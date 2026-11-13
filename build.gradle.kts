@@ -44,11 +44,11 @@ java {
 }
 
 val ideTypeStr = properties("platformType")
+val platformVersion = properties("platformVersion")
 
 // Configure Gradle IntelliJ Plugin - read more: https://plugins.jetbrains.com/docs/intellij/tools-gradle-intellij-plugin.html
 intellij {
     pluginName.set(properties("pluginName"))
-    val platformVersion = properties("platformVersion")
     version.set(platformVersion)
     type.set(ideTypeStr)
 
@@ -82,6 +82,9 @@ sourceSets {
         main {
             java {
                 srcDirs("src/main/idea")
+                if (platformVersion != "2020.1") {
+                    exclude("**/BrowserJavaFx.java")
+                }
             }
             resources {
                 srcDirs("src/main/other_lang_class")

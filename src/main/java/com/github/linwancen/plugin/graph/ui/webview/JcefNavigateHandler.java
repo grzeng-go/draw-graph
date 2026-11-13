@@ -3,6 +3,7 @@ package com.github.linwancen.plugin.graph.ui.webview;
 import com.github.linwancen.plugin.common.psi.PsiUnSaveUtils;
 import com.github.linwancen.plugin.graph.parser.Parser;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -87,6 +88,27 @@ public class JcefNavigateHandler extends CefMessageRouterHandlerAdapter {
                 callback.failure(42, "psiFile not found: " + filePath);
                 return;
             }
+            if (childName.startsWith("@")) {
+                try {
+                    int offset = Integer.parseInt(childName.substring(1));
+                    if (offset < 0 || offset > file.getLength()) {
+                        callback.failure(43, "invalid source offset: " + childName);
+                        return;
+                    }
+                    String navigationPath = filePath;
+                    EdtExecutorService.getInstance().submit(
+                            () -> ApplicationManager.getApplication().invokeLater(
+                                    () -> {
+                                        new OpenFileDescriptor(project, file, offset).navigate(true);
+                                        callback.success("navigate: " + navigationPath + "#" + offset);
+                                    }
+                            )
+                    );
+                } catch (NumberFormatException e) {
+                    callback.failure(43, "invalid source offset: " + childName);
+                }
+                return;
+            }
             navigateSelect(callback, psiFile, childName);
         });
     }
@@ -95,6 +117,7 @@ public class JcefNavigateHandler extends CefMessageRouterHandlerAdapter {
                                        @NotNull NavigatablePsiElement element, @NotNull String childName) {
         if (childName.isBlank()) {
             navigate(callback, element);
+            return;
         }
         if (navigateChild(callback, element, childName)) {
             return;

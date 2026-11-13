@@ -78,7 +78,8 @@ abstract class ParserLang<F : PsiElement> : Parser() {
         if (skipFun(state, func)) {
             return null
         }
-        var path = file?.path
+        val srcFun = CommentUtils.byteToSrc(func)
+        var path = srcFun.containingFile?.virtualFile?.path ?: file?.path
         val inJar = path == null || path.contains('!')
         if (inJar && state.skipLib && !state.autoLoad) {
             return null
@@ -89,7 +90,6 @@ abstract class ParserLang<F : PsiElement> : Parser() {
         }
         val funMap = mutableMapOf<String, String>()
         funMap["sign"] = sign
-        val srcFun = CommentUtils.byteToSrc(func)
         try {
             funMap(funMap, srcFun)
         } catch (_: Exception) {
@@ -101,7 +101,14 @@ abstract class ParserLang<F : PsiElement> : Parser() {
         if (inJar) {
             classMap?.let { path = it["sign"] }
         }
-        path?.let { funMap["link"] = "$path#${name?.substring(name.lastIndexOf(' ') + 1) ?: ""}" }
+        path?.let {
+            val anchor = if (inJar) {
+                name?.substring(name.lastIndexOf(' ') + 1) ?: ""
+            } else {
+                "@${srcFun.textOffset}"
+            }
+            funMap["link"] = "$it#$anchor"
+        }
         if (classMap == null) {
             relData.regParentChild(funMap)
         } else {
