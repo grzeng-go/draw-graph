@@ -20,6 +20,10 @@ abstract class Printer {
         // impl it
     }
 
+    protected open fun call(usageSign: String, callSign: String, order: Int) {
+        call(usageSign, callSign)
+    }
+
     protected open fun sign(input: String): String {
         return canNotUseSymbol.replace(input, "_")
     }
@@ -52,7 +56,20 @@ abstract class Printer {
             .filter { !relData.childSet.contains(it.key) }
             .forEach { item(it.value) }
         // PlantUML must def before
-        relData.callSet.forEach { call(it.first, it.second) }
+        val orderedPairs = mutableSetOf<Pair<String, String>>()
+        relData.callOrderMap.forEach { (usage, calls) ->
+            var order = 0
+            calls.forEach { called ->
+                val pair = usage to called
+                if (pair in relData.callSet) {
+                    call(usage, called, ++order)
+                    orderedPairs.add(pair)
+                }
+            }
+        }
+        relData.callSet
+            .filterNot { it in orderedPairs }
+            .forEach { call(it.first, it.second) }
     }
 
     private fun printerChildren(relData: RelData, parent: String, children: Set<String>) {

@@ -66,11 +66,12 @@ abstract class ParserLang<F : PsiElement> : Parser() {
             val sign = funcSign(state, func, file, relData) ?: continue
             // override fun
             val callSet = callSetMap.computeIfAbsent(sign) { mutableSetOf() }
-            callSet.addAll(
-                callList(func, true)
-                    .filter { !skipFun(state, it) }
-                    .mapNotNull { toSign(it) }
-                    .filter { !Skip.skip(it, state.includePattern, state.excludePattern) })
+            val calls = callList(func, true)
+                .filter { !skipFun(state, it) }
+                .mapNotNull { toSign(it) }
+                .filter { !Skip.skip(it, state.includePattern, state.excludePattern) }
+            callSet.addAll(calls)
+            relData.callOrderMap[sign] = calls.toMutableList()
         }
     }
 
@@ -139,6 +140,9 @@ abstract class ParserLang<F : PsiElement> : Parser() {
             val callSign = funcSign(state, call, callFile, relData) ?: return@recursiveCall
             val callSet = callSetMap.computeIfAbsent(if (isCall) usageSign else callSign) { mutableSetOf() }
             callSet.add(if (isCall) callSign else usageSign)
+            if (isCall) {
+                relData.callOrderMap.computeIfAbsent(usageSign) { mutableListOf() }.add(callSign)
+            }
         }
         regCall(callSetMap, relData, true)
     }

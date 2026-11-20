@@ -68,6 +68,10 @@ skinparam defaultTextAlignment center
         sb.append("\n${sign(usageSign)} --> ${sign(callSign)}")
     }
 
+    override fun call(usageSign: String, callSign: String, order: Int) {
+        sb.append("\n${sign(usageSign)} --> ${sign(callSign)} : $order")
+    }
+
     override fun toSrc(relData: RelData): Pair<String, String> {
         printerData(relData)
         sb.append("\n@enduml")

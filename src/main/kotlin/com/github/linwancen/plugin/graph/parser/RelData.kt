@@ -6,6 +6,7 @@ class RelData {
     val childSet = mutableSetOf<String>()
     val itemMap = mutableMapOf<String, MutableMap<String, String>>()
     val callSet = mutableSetOf<Pair<String, String>>()
+    val callOrderMap = mutableMapOf<String, MutableList<String>>()
 
     fun regParentChild(parentMap: MutableMap<String, String>, childMap: MutableMap<String, String>? = null) {
         val parent = parentMap["sign"] ?: return

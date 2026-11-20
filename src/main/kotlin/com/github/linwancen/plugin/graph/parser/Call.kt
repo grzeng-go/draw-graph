@@ -23,15 +23,17 @@ object Call {
      * ```
      */
     fun <R : PsiElement> findRefs(refs: Collection<R>) = refs
-        .flatMap { it.references.toList() }
-        .map {
-            try {
-                it.resolve()
-                // byte to src, not used here, because class calls are many, very slow
-                // resolve?.navigationElement ?: resolve
-            } catch (_: Throwable) {
-                // ignore
+        .flatMap { element ->
+            element.references.mapNotNull { reference ->
+                val resolved = try {
+                    reference.resolve()
+                } catch (_: Throwable) {
+                    null
+                } ?: return@mapNotNull null
+                reference.element.textOffset to resolved
             }
         }
-        .distinct()
+        .sortedBy { it.first }
+        .distinctBy { it.first to it.second }
+        .map { it.second }
 }

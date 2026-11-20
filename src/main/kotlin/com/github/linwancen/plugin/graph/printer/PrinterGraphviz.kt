@@ -25,7 +25,7 @@ ${if (DrawGraphAppState.of().lr) "rankdir=LR" else ""}
 fontname = "Microsoft YaHei,Consolas"
 node [shape = "record", style="rounded,filled", fillcolor = "#F1F1F1", fontname = "Microsoft YaHei,Consolas"]
 edge [arrowhead = "empty", fontname = "Microsoft YaHei,Consolas"]
-graph [compound=true]
+graph [compound=true, ordering=out]
 
 """
     )
@@ -77,6 +77,10 @@ graph [compound=true]
 
     override fun call(usageSign: String, callSign: String) {
         sb.append("\n\"cluster_${sign(usageSign)}\" -> \"cluster_${sign(callSign)}\"")
+    }
+
+    override fun call(usageSign: String, callSign: String, order: Int) {
+        sb.append("\n\"cluster_${sign(usageSign)}\" -> \"cluster_${sign(callSign)}\" [label=\"$order\"]")
     }
 
     override fun toSrc(relData: RelData): Pair<String, String> {

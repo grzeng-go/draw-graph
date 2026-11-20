@@ -59,6 +59,10 @@ class PrinterMermaid : Printer() {
         sb.append("\n'${sign(usageSign)}' --> '${sign(callSign)}'")
     }
 
+    override fun call(usageSign: String, callSign: String, order: Int) {
+        sb.append("\n'${sign(usageSign)}' -->|$order| '${sign(callSign)}'")
+    }
+
     override fun sign(input: String): String {
         val deleteKeyword = keyword.replace(input, "$1_")
         return canNotUseSymbol.replace(deleteKeyword, "_")
