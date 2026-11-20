@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.ruby
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState
@@ -49,4 +50,11 @@ class RubyParser : ParserLang<RMethod>() {
     override fun callList(func: RMethod, call: Boolean): List<RMethod> {
         return Call.find(func, call, RDotReference::class.java, RIdentifier::class.java)
     }
+
+    override fun callOccurrences(func: RMethod): List<CallOccurrence<RMethod>> =
+        Call.occurrences<RMethod, com.intellij.psi.PsiElement>(
+            func,
+            RDotReference::class.java,
+            RIdentifier::class.java,
+        )
 }

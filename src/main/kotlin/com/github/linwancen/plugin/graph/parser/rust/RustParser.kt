@@ -2,6 +2,7 @@ package com.github.linwancen.plugin.graph.parser.rust
 
 import com.github.linwancen.plugin.common.psi.PsiUnSaveUtils
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState
@@ -65,5 +66,12 @@ class RustParser : ParserLang<RsFunction>() {
             .findChildrenOfAnyType(func, RsPath::class.java, RsMethodCall::class.java)
             .filter { PsiTreeUtil.getNonStrictParentOfType(it, PsiComment::class.java) == null }
         return Call.findRefs(refs).filterIsInstance<RsFunction>()
+    }
+
+    override fun callOccurrences(func: RsFunction): List<CallOccurrence<RsFunction>> {
+        val refs = PsiTreeUtil
+            .findChildrenOfAnyType(func, RsPath::class.java, RsMethodCall::class.java)
+            .filter { PsiTreeUtil.getNonStrictParentOfType(it, PsiComment::class.java) == null }
+        return Call.occurrences(func, refs) { resolved -> resolved as? RsFunction }
     }
 }

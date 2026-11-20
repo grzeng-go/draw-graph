@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.go
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState
@@ -44,4 +45,7 @@ class GoParser : ParserLang<GoFunctionDeclaration>() {
     override fun callList(func: GoFunctionDeclaration, call: Boolean): List<GoFunctionDeclaration> {
         return Call.find(func, call, GoReferenceExpression::class.java)
     }
+
+    override fun callOccurrences(func: GoFunctionDeclaration): List<CallOccurrence<GoFunctionDeclaration>> =
+        Call.occurrences(func, GoReferenceExpression::class.java)
 }

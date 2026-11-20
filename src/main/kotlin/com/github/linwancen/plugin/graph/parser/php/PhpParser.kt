@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.php
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState
@@ -54,4 +55,7 @@ class PhpParser : ParserLang<Function>() {
     override fun callList(func: Function, call: Boolean): List<Function> {
         return Call.find(func, call, PhpReference::class.java)
     }
+
+    override fun callOccurrences(func: Function): List<CallOccurrence<Function>> =
+        Call.occurrences(func, PhpReference::class.java)
 }

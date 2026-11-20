@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.js
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState
@@ -51,4 +52,7 @@ open class JsParser : ParserLang<JSFunction>() {
         // not support JSProperty fun yet
         return Call.find(func, call, JSReferenceExpression::class.java)
     }
+
+    override fun callOccurrences(func: JSFunction): List<CallOccurrence<JSFunction>> =
+        Call.occurrences(func, JSReferenceExpression::class.java)
 }

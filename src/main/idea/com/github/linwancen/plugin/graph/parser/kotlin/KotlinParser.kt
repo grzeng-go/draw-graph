@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.kotlin
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.ParserUtils
 import com.github.linwancen.plugin.graph.parser.RelData
@@ -62,4 +63,7 @@ class KotlinParser : ParserLang<KtNamedFunction>() {
     override fun callList(func: KtNamedFunction, call: Boolean): List<KtNamedFunction> {
         return Call.find(func, call, KtNameReferenceExpression::class.java)
     }
+
+    override fun callOccurrences(func: KtNamedFunction): List<CallOccurrence<KtNamedFunction>> =
+        Call.occurrences(func, KtNameReferenceExpression::class.java)
 }

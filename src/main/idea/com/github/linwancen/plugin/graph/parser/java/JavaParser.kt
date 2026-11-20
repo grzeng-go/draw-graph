@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.java
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphAppState
@@ -72,6 +73,9 @@ open class JavaParser : ParserLang<PsiMethod>() {
         list.addAll(override)
         return list
     }
+
+    override fun callOccurrences(func: PsiMethod): List<CallOccurrence<PsiMethod>> =
+        Call.occurrences(func, PsiJavaCodeReferenceElement::class.java)
 
     override fun fileCall(
         callSetMap: MutableMap<String, MutableSet<String>>,

@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.c
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.CommentUtils
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
@@ -49,5 +50,12 @@ class CParser : ParserLang<OCFunctionDefinition>() {
             .map { it.parent }
             .filterIsInstance<OCFunctionDefinition>()
               else Call.find(func, false, funClass())
+    }
+
+    override fun callOccurrences(func: OCFunctionDefinition): List<CallOccurrence<OCFunctionDefinition>> {
+        val refs = PsiTreeUtil.findChildrenOfAnyType(func, OCReferenceElement::class.java)
+        return Call.occurrences(func, refs) { resolved ->
+            (resolved as? OCDeclarator)?.parent as? OCFunctionDefinition
+        }
     }
 }

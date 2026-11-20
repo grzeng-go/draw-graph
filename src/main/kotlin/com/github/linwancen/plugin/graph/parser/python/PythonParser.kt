@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.python
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState
@@ -43,4 +44,7 @@ class PythonParser : ParserLang<PyFunction>() {
     override fun callList(func: PyFunction, call: Boolean): List<PyFunction> {
         return Call.find(func, call, PyReferenceExpression::class.java)
     }
+
+    override fun callOccurrences(func: PyFunction): List<CallOccurrence<PyFunction>> =
+        Call.occurrences(func, PyReferenceExpression::class.java)
 }

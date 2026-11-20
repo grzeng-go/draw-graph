@@ -2,6 +2,7 @@ package com.github.linwancen.plugin.graph.printer
 
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.settings.DrawGraphAppState
+import com.github.linwancen.plugin.graph.ui.DrawGraphBundle
 
 abstract class Printer {
     protected open fun beforeGroup(groupMap: MutableMap<String, String>) {
@@ -24,8 +25,26 @@ abstract class Printer {
         call(usageSign, callSign)
     }
 
+    protected open fun call(
+        usageSign: String,
+        callSign: String,
+        order: Int,
+        callSite: RelData.CallSite?,
+    ) {
+        call(usageSign, callSign, order)
+    }
+
     protected open fun sign(input: String): String {
         return canNotUseSymbol.replace(input, "_")
+    }
+
+    protected fun itemName(itemMap: Map<String, String>): String? {
+        val name = itemMap["name"] ?: return null
+        return when (itemMap["status"]) {
+            "external" -> "$name [${DrawGraphBundle.message("call.target.external")}: ${itemMap["sign"]}]"
+            "not-scanned" -> "$name [${DrawGraphBundle.message("call.target.not.scanned")}: ${itemMap["sign"]}]"
+            else -> name
+        }
     }
 
     protected open fun addLine(s: String?, sb: StringBuilder, newLineEscape: Boolean = false) {
@@ -57,12 +76,17 @@ abstract class Printer {
             .forEach { item(it.value) }
         // PlantUML must def before
         val orderedPairs = mutableSetOf<Pair<String, String>>()
+        val callSites = relData.callRelations.groupBy { it.callerSign to it.targetSign }
+        val callSiteIndexes = mutableMapOf<Pair<String, String>, Int>()
         relData.callOrderMap.forEach { (usage, calls) ->
             var order = 0
             calls.forEach { called ->
                 val pair = usage to called
                 if (pair in relData.callSet) {
-                    call(usage, called, ++order)
+                    val siteIndex = callSiteIndexes[pair] ?: 0
+                    val callSite = callSites[pair]?.getOrNull(siteIndex)?.callSite
+                    callSiteIndexes[pair] = siteIndex + 1
+                    call(usage, called, ++order, callSite)
                     orderedPairs.add(pair)
                 }
             }

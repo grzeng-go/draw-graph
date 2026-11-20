@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.scala
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.parser.java.JavaParserUtils
@@ -41,4 +42,7 @@ class ScalaParser : ParserLang<ScFunctionDefinition>() {
     override fun callList(func: ScFunctionDefinition, call: Boolean): List<ScFunctionDefinition> {
         return Call.find(func, call, ScReferenceExpression::class.java)
     }
+
+    override fun callOccurrences(func: ScFunctionDefinition): List<CallOccurrence<ScFunctionDefinition>> =
+        Call.occurrences(func, ScReferenceExpression::class.java)
 }

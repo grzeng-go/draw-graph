@@ -10,6 +10,7 @@ import com.intellij.openapi.project.Project
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.sql.DriverManager
+import java.sql.Types
 
 class RelData2SQLite {
     private val log = LoggerFactory.getLogger(this::class.java)
@@ -35,9 +36,16 @@ class RelData2SQLite {
                             s.executeUpdate("create table parentChildMap(parentSign TEXT, childSign TEXT)")
                             s.executeUpdate("drop table if exists callSet")
                             s.executeUpdate("create table callSet(usageSign TEXT, callSign TEXT)")
+                            s.executeUpdate("drop table if exists callRelation")
+                            s.executeUpdate(
+                                "create table callRelation(callerSign TEXT, targetSign TEXT, sourcePath TEXT, sourceOffset INTEGER, sourceLine INTEGER, resolution TEXT, depth INTEGER)"
+                            )
                         }
                         val parentSize = relData.parentChildMap.values.sumBy { it.size }
-                        val taskTool = TaskTool(indicator, relData.itemMap.size + parentSize + relData.callSet.size)
+                        val taskTool = TaskTool(
+                            indicator,
+                            relData.itemMap.size + parentSize + relData.callSet.size + relData.callRelations.size,
+                        )
                         var i = 0
                         val gson = Gson()
                         connection.autoCommit = false
@@ -78,6 +86,33 @@ class RelData2SQLite {
                                 p.addBatch()
                                 if (i++ % 1000 == 0) {
                                     taskTool.beforeNext(i, "3. insert into callSet)")
+                                    p.executeBatch()
+                                    connection.commit()
+                                }
+                            }
+                            p.executeBatch()
+                            connection.commit()
+                        }
+                        connection.prepareStatement("insert into callRelation values(?, ?, ?, ?, ?, ?, ?)").use { p ->
+                            relData.callRelations.forEach {
+                                p.setString(1, it.callerSign)
+                                p.setString(2, it.targetSign)
+                                p.setString(3, it.callSite.sourcePath)
+                                if (it.callSite.sourceOffset == null) {
+                                    p.setNull(4, Types.INTEGER)
+                                } else {
+                                    p.setInt(4, it.callSite.sourceOffset)
+                                }
+                                if (it.callSite.sourceLine == null) {
+                                    p.setNull(5, Types.INTEGER)
+                                } else {
+                                    p.setInt(5, it.callSite.sourceLine)
+                                }
+                                p.setString(6, it.callSite.resolution)
+                                p.setInt(7, it.depth)
+                                p.addBatch()
+                                if (i++ % 1000 == 0) {
+                                    taskTool.beforeNext(i, "4. insert into callRelation")
                                     p.executeBatch()
                                     connection.commit()
                                 }

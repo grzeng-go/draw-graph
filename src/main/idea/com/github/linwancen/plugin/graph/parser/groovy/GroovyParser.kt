@@ -1,6 +1,7 @@
 package com.github.linwancen.plugin.graph.parser.groovy
 
 import com.github.linwancen.plugin.graph.parser.Call
+import com.github.linwancen.plugin.graph.parser.CallOccurrence
 import com.github.linwancen.plugin.graph.parser.ParserLang
 import com.github.linwancen.plugin.graph.parser.RelData
 import com.github.linwancen.plugin.graph.parser.java.JavaParserUtils
@@ -38,4 +39,7 @@ class GroovyParser : ParserLang<GrMethod>() {
     override fun callList(func: GrMethod, call: Boolean): List<GrMethod> {
         return Call.find(func, call, GrReferenceExpression::class.java)
     }
+
+    override fun callOccurrences(func: GrMethod): List<CallOccurrence<GrMethod>> =
+        Call.occurrences(func, GrReferenceExpression::class.java)
 }

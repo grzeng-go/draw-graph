@@ -15,7 +15,15 @@ import java.util.function.Consumer
 
 class PrinterMermaid : Printer() {
 
-    val sb = StringBuilder("graph ${if (DrawGraphAppState.of().lr) "LR" else "TB"}\n\n")
+    val sb = StringBuilder(
+        """graph ${if (DrawGraphAppState.of().lr) "LR" else "TB"}
+classDef externalNode fill:#eeeeee,stroke:#777777,stroke-dasharray: 4 3
+classDef boundaryNode fill:#fff8e1,stroke:#f9a825,stroke-dasharray: 4 3
+classDef unresolvedNode fill:#ffebee,stroke:#c62828,stroke-dasharray: 4 3
+classDef dynamicNode fill:#e0f7fa,stroke:#00838f,stroke-dasharray: 4 3
+
+"""
+    )
 
     override fun beforeGroup(groupMap: MutableMap<String, String>) {
         sb.append("\nsubgraph ")
@@ -43,7 +51,7 @@ class PrinterMermaid : Printer() {
             addLine(itemMap["@2"], sb)
             addLine(itemMap["@3"], sb)
             if (isItem) {
-                sb.append("${itemMap["name"]}")
+                sb.append(itemName(itemMap))
             }
             sb.append("\"")
             sb.append(if (isItem) ")" else "]")
@@ -53,6 +61,14 @@ class PrinterMermaid : Printer() {
         sb.append("  click '${sign(itemMap["sign"] ?: return)}' call navigate(\"$link\")")
         sb.append("\n\n")
         sb.append("  class ${sign(itemMap["sign"] ?: return)} searchMethod\n\n")
+        val statusClass = when (itemMap["status"]) {
+            "external" -> "externalNode"
+            "not-scanned" -> "boundaryNode"
+            "unresolved" -> "unresolvedNode"
+            "dynamic" -> "dynamicNode"
+            else -> null
+        }
+        statusClass?.let { sb.append("  class ${sign(itemMap["sign"] ?: return)} $it\n\n") }
     }
 
     override fun call(usageSign: String, callSign: String) {
@@ -61,6 +77,16 @@ class PrinterMermaid : Printer() {
 
     override fun call(usageSign: String, callSign: String, order: Int) {
         sb.append("\n'${sign(usageSign)}' -->|$order| '${sign(callSign)}'")
+    }
+
+    override fun call(
+        usageSign: String,
+        callSign: String,
+        order: Int,
+        callSite: RelData.CallSite?,
+    ) {
+        val label = callSite?.sourceLine?.let { "$order @L$it" } ?: order.toString()
+        sb.append("\n'${sign(usageSign)}' -->|$label| '${sign(callSign)}'")
     }
 
     override fun sign(input: String): String {

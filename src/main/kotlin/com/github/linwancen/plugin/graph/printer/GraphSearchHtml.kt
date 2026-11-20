@@ -15,6 +15,8 @@ object GraphSearchHtml {
   .dg-search-toolbar button { padding: 4px 8px; }
   .dg-search-match > rect, .dg-search-match > polygon, .dg-search-match > ellipse, .dg-search-match > path { stroke: #ff9800 !important; stroke-width: 3px !important; }
   .dg-search-current > rect, .dg-search-current > polygon, .dg-search-current > ellipse, .dg-search-current > path { stroke: #f44336 !important; stroke-width: 5px !important; }
+  .dg-selected-method > rect, .dg-selected-method > polygon, .dg-selected-method > ellipse, .dg-selected-method > path { stroke: #1565c0 !important; stroke-width: 5px !important; }
+  .dg-related-edge path, .dg-related-edge polygon, path.dg-related-edge { stroke: #e53935 !important; stroke-width: 3px !important; }
 </style>
 <div class="dg-search-toolbar">
   <input id="dg-search-input" type="search" placeholder="$search" aria-label="$search">
@@ -29,12 +31,71 @@ object GraphSearchHtml {
     let matches = [];
     let current = -1;
 
+    function pointNearNode(path, rect) {
+      try {
+        const length = path.getTotalLength();
+        const matrix = path.getScreenCTM();
+        if (!length || !matrix) return false;
+        const svg = path.ownerSVGElement;
+        const near = point => {
+          const screenPoint = svg.createSVGPoint();
+          screenPoint.x = point.x;
+          screenPoint.y = point.y;
+          const transformed = screenPoint.matrixTransform(matrix);
+          const margin = 16;
+          return transformed.x >= rect.left - margin && transformed.x <= rect.right + margin &&
+            transformed.y >= rect.top - margin && transformed.y <= rect.bottom + margin;
+        };
+        return near(path.getPointAtLength(0)) || near(path.getPointAtLength(length));
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function highlightRelated(node) {
+      document.querySelectorAll('.dg-selected-method').forEach(item => item.classList.remove('dg-selected-method'));
+      document.querySelectorAll('.dg-related-edge').forEach(item => item.classList.remove('dg-related-edge'));
+      node.classList.add('dg-selected-method');
+
+      const svg = node.ownerSVGElement;
+      if (!svg) return;
+      const nodeTitleElement = node.querySelector('title');
+      const nodeTitle = nodeTitleElement ? nodeTitleElement.textContent.trim() : null;
+      const flowchartId = node.id.match(/^flowchart-(.*)-\d+$/);
+      const mermaidNodeId = flowchartId ? flowchartId[1] : null;
+      const rect = node.getBoundingClientRect();
+      const paths = Array.from(svg.querySelectorAll('path')).filter(path => !path.closest('.searchMethod'));
+      const highlighted = new Set();
+
+      paths.forEach(path => {
+        const edge = path.closest('g.edge, g.edgePath, g.link') || path;
+        let connected = pointNearNode(path, rect);
+        if (edge.matches('g.edge') && nodeTitle) {
+          const edgeTitle = edge.querySelector('title');
+          const title = edgeTitle ? edgeTitle.textContent : '';
+          connected = title.split('->').some(endpoint => endpoint.trim() === nodeTitle);
+        } else if (edge.matches('g.edgePath') && mermaidNodeId) {
+          connected = Array.from(edge.classList).some(edgeClass =>
+            edgeClass === 'LS-' + mermaidNodeId || edgeClass === 'LE-' + mermaidNodeId
+          );
+        }
+        if (connected) highlighted.add(edge);
+      });
+      highlighted.forEach(edge => edge.classList.add('dg-related-edge'));
+    }
+
+    document.addEventListener('click', event => {
+      const target = event.target instanceof Element ? event.target.closest('.searchMethod') : null;
+      if (target) highlightRelated(target);
+    }, true);
+
     function select(index) {
       if (matches.length === 0) return;
       current = (index + matches.length) % matches.length;
       document.querySelectorAll('.dg-search-current').forEach(node => node.classList.remove('dg-search-current'));
       const node = matches[current];
       node.classList.add('dg-search-current');
+      highlightRelated(node);
       node.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
       count.textContent = (current + 1) + ' / ' + matches.length;
     }

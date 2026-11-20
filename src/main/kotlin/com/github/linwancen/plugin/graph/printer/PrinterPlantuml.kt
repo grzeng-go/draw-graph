@@ -55,7 +55,7 @@ skinparam defaultTextAlignment center
             addLine(map["@1"], sb, true)
             addLine(map["@2"], sb, true)
             addLine(map["@3"], sb, true)
-            sb.append("${map["name"]}\"")
+            sb.append("${itemName(map)}\"")
         }
         val id = "${if (isItem) "elem" else "cluster"}_$sign"
         if (isItem) {
@@ -70,6 +70,16 @@ skinparam defaultTextAlignment center
 
     override fun call(usageSign: String, callSign: String, order: Int) {
         sb.append("\n${sign(usageSign)} --> ${sign(callSign)} : $order")
+    }
+
+    override fun call(
+        usageSign: String,
+        callSign: String,
+        order: Int,
+        callSite: RelData.CallSite?,
+    ) {
+        val label = callSite?.sourceLine?.let { "$order @L$it" } ?: order.toString()
+        sb.append("\n${sign(usageSign)} --> ${sign(callSign)} : $label")
     }
 
     override fun toSrc(relData: RelData): Pair<String, String> {
