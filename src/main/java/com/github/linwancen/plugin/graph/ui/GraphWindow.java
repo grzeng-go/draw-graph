@@ -22,6 +22,11 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.event.FocusEvent;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.awt.Component;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -32,66 +37,81 @@ public class GraphWindow {
     DrawGraphAppState appState;
     @NotNull
     DrawGraphProjectState projectState;
+    private final boolean primary;
+    private final JTabbedPane classTabs = new JTabbedPane();
+    private final LinkedHashMap<String, GraphWindow> classGraphWindows = new LinkedHashMap<>();
+    private VirtualFile sourceFile;
+    private int sourceOffset;
+    private boolean selectingClassTab;
+    private static final int MAX_CLASS_TABS = 10;
 
     public GraphWindow(@NotNull Project project, ToolWindow toolWindow) {
+        this(project, toolWindow, true);
+    }
+
+    public GraphWindow(@NotNull Project project, ToolWindow toolWindow, boolean primary) {
         this.project = project;
         this.toolWindow = toolWindow;
+        this.primary = primary;
         appState = DrawGraphAppState.of(null);
         projectState = DrawGraphProjectState.of(project);
 
         openDir.addActionListener(e -> InstallMermaid.openDir(project));
-        reload.addActionListener(e -> RelController.reload(project));
-        reset.addActionListener(e -> initOut(project));
+        reload.addActionListener(e -> RelController.reload(project, this));
+        reset.addActionListener(e -> resetCurrentGraph());
 
-        autoLoad.setSelected(true);
-        projectState.setAutoLoad(true);
+        autoLoad.setSelected(primary);
+        autoLoad.setEnabled(primary);
+        if (primary) {
+            projectState.setAutoLoad(true);
+        }
         autoLoad.addActionListener(e -> {
             projectState.setAutoLoad(autoLoad.isSelected());
             if (autoLoad.isSelected()) {
-                RelController.forFile(project, FileEditorManager.getInstance(project).getSelectedFiles(), false);
+                GraphWindowFactory.openSelectedFile(project);
             }
         });
 
         skipLib.setSelected(projectState.getSkipLib());
         skipLib.addActionListener(e -> {
             projectState.setSkipLib(skipLib.isSelected());
-            RelController.reload(project);
+            RelController.reload(project, this);
         });
 
         skipGetSetIs.setSelected(projectState.getSkipGetSetIs());
         skipGetSetIs.addActionListener(e -> {
             projectState.setSkipGetSetIs(skipGetSetIs.isSelected());
-            RelController.reload(project);
+            RelController.reload(project, this);
         });
 
         lr.setSelected(appState.getLr());
         lr.addActionListener(e -> {
             appState.setLr(lr.isSelected());
-            RelController.reload(project);
+            RelController.reload(project, this);
         });
 
         doc.setSelected(appState.getDoc());
         doc.addActionListener(e -> {
             appState.setDoc(doc.isSelected());
-            RelController.reload(project);
+            RelController.reload(project, this);
         });
 
         impl.setSelected(appState.getImpl());
         impl.addActionListener(e -> {
             appState.setImpl(impl.isSelected());
-            RelController.reload(project);
+            RelController.reload(project, this);
         });
 
         mvc.setSelected(appState.getMvc());
         mvc.addActionListener(e -> {
             appState.setMvc(mvc.isSelected());
-            RelController.reload(project);
+            RelController.reload(project, this);
         });
 
         online.setSelected(appState.getOnline());
         online.addActionListener(e -> {
             appState.setOnline(online.isSelected());
-            RelController.reload(project);
+            RelController.reload(project, this);
         });
 
         UiUtils.onChange(limit, String.valueOf(appState.getLimit()), s -> {
@@ -119,19 +139,137 @@ public class GraphWindow {
             projectState.reset();
         });
 
-        @Nullable FileEditor selectedEditor = FileEditorManager.getInstance(project).getSelectedEditor();
-        if (selectedEditor != null) {
-            @Nullable VirtualFile file = selectedEditor.getFile();
-            RelController.forFile(project, new VirtualFile[]{file}, false);
+        if (primary) {
+            setupClassTabs();
+        } else {
+            initOut(project);
         }
-        initOut(project);
+    }
+
+    public boolean isPrimary() {
+        return primary;
     }
 
     private void initOut(Project project) {
+        disposeBrowsers();
         plantumlBrowser = BrowserFactory.of(plantumlOut, project);
         mermaidBrowser = BrowserFactory.of(mermaidOut, project);
         graphvizBrowser = BrowserFactory.of(graphvizOut, project);
         initSrc();
+    }
+
+    private void disposeBrowsers() {
+        if (plantumlBrowser != null) plantumlBrowser.dispose();
+        if (mermaidBrowser != null) mermaidBrowser.dispose();
+        if (graphvizBrowser != null) graphvizBrowser.dispose();
+    }
+
+    private void setupClassTabs() {
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        for (Component component : new Component[]{
+                openDir, reload, reset, lr, autoLoad, skipLib, skipGetSetIs, doc, impl, mvc,
+        }) {
+            toolbar.add(component);
+        }
+        mainPanel.removeAll();
+        mainPanel.setLayout(new BorderLayout());
+        mainPanel.add(toolbar, BorderLayout.NORTH);
+        mainPanel.add(classTabs, BorderLayout.CENTER);
+        classTabs.addChangeListener(event -> {
+            if (selectingClassTab) {
+                return;
+            }
+            GraphWindow selected = selectedGraphWindow();
+            if (selected != null) {
+                markRecentlyUsed(selected);
+                selected.navigateToSource();
+            }
+        });
+    }
+
+    public GraphWindow openClassTab(String key, String title, VirtualFile file, int offset) {
+        GraphWindow existing = classGraphWindows.get(key);
+        if (existing != null) {
+            existing.sourceFile = file;
+            existing.sourceOffset = offset;
+            selectingClassTab = true;
+            classTabs.setSelectedComponent(existing.graphTabs);
+            selectingClassTab = false;
+            markRecentlyUsed(existing);
+            existing.navigateToSource();
+            return existing;
+        }
+
+        GraphWindow page = new GraphWindow(project, toolWindow, false);
+        page.sourceFile = file;
+        page.sourceOffset = offset;
+        classGraphWindows.put(key, page);
+        classTabs.addTab(title, page.graphTabs);
+        selectingClassTab = true;
+        classTabs.setSelectedComponent(page.graphTabs);
+        selectingClassTab = false;
+        trimClassTabs();
+        page.navigateToSource();
+        return page;
+    }
+
+    public GraphWindow selectedGraphWindow() {
+        Component selected = classTabs.getSelectedComponent();
+        for (GraphWindow window : classGraphWindows.values()) {
+            if (window.graphTabs == selected) {
+                return window;
+            }
+        }
+        return null;
+    }
+
+    public GraphWindow findClassTab(String key) {
+        return classGraphWindows.get(key);
+    }
+
+    private void markRecentlyUsed(GraphWindow window) {
+        String key = null;
+        for (Map.Entry<String, GraphWindow> entry : classGraphWindows.entrySet()) {
+            if (entry.getValue() == window) {
+                key = entry.getKey();
+                break;
+            }
+        }
+        if (key != null) {
+            classGraphWindows.remove(key);
+            classGraphWindows.put(key, window);
+        }
+    }
+
+    private void trimClassTabs() {
+        while (classGraphWindows.size() > MAX_CLASS_TABS) {
+            Map.Entry<String, GraphWindow> oldest = classGraphWindows.entrySet().iterator().next();
+            classTabs.remove(oldest.getValue().graphTabs);
+            oldest.getValue().disposePage();
+            classGraphWindows.remove(oldest.getKey());
+        }
+    }
+
+    private void navigateToSource() {
+        if (sourceFile != null && sourceFile.isValid()) {
+            FileEditor currentEditor = FileEditorManager.getInstance(project).getSelectedEditor();
+            if (currentEditor != null && sourceFile.equals(currentEditor.getFile())) {
+                com.intellij.openapi.editor.Editor editor =
+                        FileEditorManager.getInstance(project).getSelectedTextEditor();
+                if (editor != null && editor.getCaretModel().getOffset() == sourceOffset) {
+                    return;
+                }
+            }
+            new com.intellij.openapi.fileEditor.OpenFileDescriptor(project, sourceFile, sourceOffset).navigate(true);
+        }
+    }
+
+    private void resetCurrentGraph() {
+        GraphWindow selected = primary ? selectedGraphWindow() : this;
+        if (selected != null) {
+            selected.initOut(project);
+            RelController.reload(project, selected);
+        }
     }
 
     private void initSrc() {
@@ -159,11 +297,18 @@ public class GraphWindow {
     public void closeAutoLoad() {
         EdtExecutorService.getInstance().submit(() -> {
             autoLoad.setSelected(false);
-            projectState.setAutoLoad(false);
+            if (primary) {
+                projectState.setAutoLoad(false);
+            }
         });
     }
 
+    public void disposePage() {
+        disposeBrowsers();
+    }
+
     JPanel mainPanel;
+    private JTabbedPane graphTabs;
 
     // region title
     private JButton openDir;

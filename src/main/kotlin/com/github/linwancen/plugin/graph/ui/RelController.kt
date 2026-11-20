@@ -11,29 +11,39 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Computable
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.PsiElement
+import java.util.Collections
+import java.util.WeakHashMap
 import org.slf4j.LoggerFactory
 
 object RelController {
     private val LOG = LoggerFactory.getLogger(this::class.java)
 
-    @JvmStatic
-    val lastFilesMap = mutableMapOf<Project, Array<VirtualFile>>()
-    val lastElementMap = mutableMapOf<Project, PsiElement>()
-    val lastCallUsageMap = mutableMapOf<Project, Boolean?>()
+    private sealed class GraphRequest {
+        data class Files(val files: Array<VirtualFile>) : GraphRequest()
+        data class Element(val element: PsiElement, val call: Boolean) : GraphRequest()
+        data class InjectedElement(val element: PsiElement) : GraphRequest()
+    }
+
+    private val requestByWindow =
+        Collections.synchronizedMap(WeakHashMap<GraphWindow, GraphRequest>())
 
     @JvmStatic
     fun reload(project: Project) {
-        lastFilesMap[project]?.let { forFile(project, it, false) }
-        lastElementMap[project]?.let {
-            val call = lastCallUsageMap[project]
-            if (call != null) {
-                forElement(project, it, lastCallUsageMap[project] ?: return)
-            } else {
-                forInjectedElement(project, it)
-            }
+        val window = GraphWindowFactory.activeWindow(project) ?: return
+        reload(project, window)
+    }
+
+    @JvmStatic
+    fun reload(project: Project, window: GraphWindow) {
+        val target = if (window.isPrimary) window.selectedGraphWindow() ?: return else window
+        when (val request = requestByWindow[target] ?: return) {
+            is GraphRequest.Files -> forFile(project, target, request.files, false)
+            is GraphRequest.Element -> forElement(project, target, request.element, request.call)
+            is GraphRequest.InjectedElement -> forInjectedElement(project, target, request.element)
         }
     }
 
@@ -42,15 +52,17 @@ object RelController {
      */
     @JvmStatic
     fun forFile(project: Project, files: Array<VirtualFile>, fromAction: Boolean) {
+        GraphWindowFactory.openFilesTab(project, files)
+    }
+
+    @JvmStatic
+    fun forFile(project: Project, window: GraphWindow, files: Array<VirtualFile>, fromAction: Boolean) {
         try {
-            lastElementMap.remove(project)
-            lastCallUsageMap.remove(project)
-            lastFilesMap[project] = files
+            requestByWindow[window] = GraphRequest.Files(files)
             if (fromAction) {
                 // let it init
-                ToolWindowManager.getInstance(project).getToolWindow("Graph")?.activate(null)
+                window.toolWindow.activate(null)
             }
-            val window = GraphWindowFactory.winMap[project] ?: return
             if (!fromAction && !window.toolWindow.isVisible) {
                 return
             }
@@ -113,12 +125,14 @@ object RelController {
      */
     @JvmStatic
     fun forElement(project: Project, psiElement: PsiElement, call: Boolean) {
+        GraphWindowFactory.openMethodTab(project, psiElement, call)
+    }
+
+    @JvmStatic
+    fun forElement(project: Project, window: GraphWindow, psiElement: PsiElement, call: Boolean) {
         try {
-            lastFilesMap.remove(project)
-            lastElementMap[project] = psiElement
-            lastCallUsageMap[project] = call
+            requestByWindow[window] = GraphRequest.Element(psiElement, call)
             ToolWindowManager.getInstance(project).getToolWindow("Graph")?.activate(null)
-            val window = GraphWindowFactory.winMap[project] ?: return
             object : Task.Backgroundable(project, "draw ${if (call) "call" else "usage"}") {
                 override fun run(indicator: ProgressIndicator) {
                     try {
@@ -143,11 +157,33 @@ object RelController {
      */
     @JvmStatic
     fun forInjectedElement(project: Project, psiFile: PsiElement) {
+        val host = GraphWindowFactory.activeWindow(project) ?: return
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            val (info, file, offset) = ApplicationManager.getApplication().runReadAction(
+                Computable<Triple<Pair<String, String>, VirtualFile?, Int>> {
+                    Triple(
+                        Parser.graphClassInfo(project, psiFile),
+                        psiFile.containingFile?.virtualFile,
+                        psiFile.textOffset,
+                    )
+                },
+            )
+            val target = host.openClassTab(
+                info.first,
+                info.second,
+                file,
+                offset,
+            )
+            host.toolWindow.activate(null)
+            forInjectedElement(project, target, psiFile)
+        }
+    }
+
+    @JvmStatic
+    fun forInjectedElement(project: Project, window: GraphWindow, psiFile: PsiElement) {
         try {
-            lastFilesMap.remove(project)
-            lastElementMap[project] = psiFile
-            lastCallUsageMap.remove(project)
-            val window = GraphWindowFactory.winMap[project] ?: return
+            requestByWindow[window] = GraphRequest.InjectedElement(psiFile)
             DumbService.getInstance(project).runReadActionInSmartMode {
                 val src = PsiUnSaveUtils.getText(psiFile)
                 if (LangUtils.matchBaseLanguageId(psiFile, "HTML") != null) {

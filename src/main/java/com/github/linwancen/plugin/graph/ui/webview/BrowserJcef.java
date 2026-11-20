@@ -33,4 +33,12 @@ public class BrowserJcef extends Browser {
             jbCefBrowser.loadHTML(html);
         }
     }
+
+    @Override
+    public void dispose() {
+        if (jbCefBrowser != null) {
+            jbCefBrowser.dispose();
+            jbCefBrowser = null;
+        }
+    }
 }

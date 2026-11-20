@@ -2,6 +2,7 @@ package com.github.linwancen.plugin.graph.ui.webview;
 
 import com.github.linwancen.plugin.common.psi.PsiUnSaveUtils;
 import com.github.linwancen.plugin.graph.parser.Parser;
+import com.github.linwancen.plugin.graph.ui.GraphWindowFactory;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.DumbService;
@@ -56,12 +57,13 @@ public class JcefNavigateHandler extends CefMessageRouterHandlerAdapter {
             callback.success("openDevtools");
             return;
         }
-        if (!request.startsWith("navigate:")) {
+        boolean openGraph = request.startsWith("openGraph:");
+        if (!openGraph && !request.startsWith("navigate:")) {
             callback.failure(40, "not support: " + request);
             return;
         }
         DumbService.getInstance(project).runReadActionInSmartMode(() -> {
-            String link = request.substring("navigate:".length());
+            String link = request.substring(openGraph ? "openGraph:".length() : "navigate:".length());
             @NotNull String filePath = link;
             @NotNull String childName = "";
             int i = link.indexOf("#");
@@ -70,7 +72,7 @@ public class JcefNavigateHandler extends CefMessageRouterHandlerAdapter {
                 childName = link.substring(i + 1);
             }
             // className to Element
-            if (!filePath.contains("/")) {
+            if (!filePath.contains("/") && !filePath.contains("\\")) {
                 PsiElement psiElement = Parser.nameToElement(project, filePath);
                 if (psiElement instanceof NavigatablePsiElement) {
                     navigateSelect(callback, (NavigatablePsiElement) psiElement, childName);
@@ -93,6 +95,19 @@ public class JcefNavigateHandler extends CefMessageRouterHandlerAdapter {
                     int offset = Integer.parseInt(childName.substring(1));
                     if (offset < 0 || offset > file.getLength()) {
                         callback.failure(43, "invalid source offset: " + childName);
+                        return;
+                    }
+                    if (openGraph) {
+                        PsiElement target = psiFile.findElementAt(offset);
+                        if (target == null && offset > 0) {
+                            target = psiFile.findElementAt(offset - 1);
+                        }
+                        if (target == null) {
+                            callback.failure(44, "method not found at offset: " + offset);
+                            return;
+                        }
+                        GraphWindowFactory.openMethodTab(project, target, true);
+                        callback.success("open graph: " + filePath + "#" + offset);
                         return;
                     }
                     String navigationPath = filePath;

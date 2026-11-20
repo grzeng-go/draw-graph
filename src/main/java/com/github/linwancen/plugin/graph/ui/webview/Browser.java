@@ -14,6 +14,9 @@ public abstract class Browser {
 
     public abstract void loadImpl(String html);
 
+    public void dispose() {
+    }
+
     public String load(String html) {
         try {
             if (html != null) {

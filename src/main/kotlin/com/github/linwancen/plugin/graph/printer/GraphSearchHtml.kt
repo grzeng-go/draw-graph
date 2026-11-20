@@ -17,6 +17,7 @@ object GraphSearchHtml {
   .dg-search-current > rect, .dg-search-current > polygon, .dg-search-current > ellipse, .dg-search-current > path { stroke: #f44336 !important; stroke-width: 5px !important; }
   .dg-selected-method > rect, .dg-selected-method > polygon, .dg-selected-method > ellipse, .dg-selected-method > path { stroke: #1565c0 !important; stroke-width: 5px !important; }
   .dg-related-edge path, .dg-related-edge polygon, path.dg-related-edge { stroke: #e53935 !important; stroke-width: 3px !important; }
+  .dg-related-edge text, .dg-related-edge tspan, .dg-related-edge-label, .dg-related-edge-label text, .dg-related-edge-label tspan { fill: #e53935 !important; color: #e53935 !important; font-weight: bold !important; }
 </style>
 <div class="dg-search-toolbar">
   <input id="dg-search-input" type="search" placeholder="$search" aria-label="$search">
@@ -52,9 +53,55 @@ object GraphSearchHtml {
       }
     }
 
+    function highlightEdgeLabel(svg, path, edge) {
+      if (edge.matches('g.edgePath')) {
+        const edgePaths = Array.from(svg.querySelectorAll('g.edgePath'));
+        const edgeLabels = Array.from(svg.querySelectorAll('g.edgeLabel'));
+        const index = edgePaths.indexOf(edge);
+        if (index >= 0 && edgeLabels[index]) {
+          edgeLabels[index].classList.add('dg-related-edge-label');
+          return;
+        }
+      }
+
+      if (edge !== path && edge.querySelector('text')) {
+        edge.classList.add('dg-related-edge');
+        return;
+      }
+
+      try {
+        const length = path.getTotalLength();
+        const matrix = path.getScreenCTM();
+        if (!length || !matrix) return;
+        const svgPoint = svg.createSVGPoint();
+        const midpoint = path.getPointAtLength(length / 2);
+        svgPoint.x = midpoint.x;
+        svgPoint.y = midpoint.y;
+        const screenPoint = svgPoint.matrixTransform(matrix);
+        const labels = Array.from(svg.querySelectorAll('g.edgeLabel, text'))
+          .filter(label => !label.closest('.searchMethod'));
+        let nearest = null;
+        let nearestDistance = 48;
+        labels.forEach(label => {
+          const rect = label.getBoundingClientRect();
+          const dx = rect.left + rect.width / 2 - screenPoint.x;
+          const dy = rect.top + rect.height / 2 - screenPoint.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < nearestDistance) {
+            nearest = label;
+            nearestDistance = distance;
+          }
+        });
+        if (nearest) nearest.classList.add('dg-related-edge-label');
+      } catch (_) {
+        // SVG text geometry is not available before the browser finishes layout.
+      }
+    }
+
     function highlightRelated(node) {
       document.querySelectorAll('.dg-selected-method').forEach(item => item.classList.remove('dg-selected-method'));
       document.querySelectorAll('.dg-related-edge').forEach(item => item.classList.remove('dg-related-edge'));
+      document.querySelectorAll('.dg-related-edge-label').forEach(item => item.classList.remove('dg-related-edge-label'));
       node.classList.add('dg-selected-method');
 
       const svg = node.ownerSVGElement;
@@ -79,7 +126,10 @@ object GraphSearchHtml {
             edgeClass === 'LS-' + mermaidNodeId || edgeClass === 'LE-' + mermaidNodeId
           );
         }
-        if (connected) highlighted.add(edge);
+        if (connected) {
+          highlighted.add(edge);
+          highlightEdgeLabel(svg, path, edge);
+        }
       });
       highlighted.forEach(edge => edge.classList.add('dg-related-edge'));
     }

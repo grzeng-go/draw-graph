@@ -58,7 +58,12 @@ classDef dynamicNode fill:#e0f7fa,stroke:#00838f,stroke-dasharray: 4 3
         }
         sb.append("\n")
         val link = itemMap["link"]?.replace(")", "") ?: ""
-        sb.append("  click '${sign(itemMap["sign"] ?: return)}' call navigate(\"$link\")")
+        val action = if (isItem && itemMap["status"] !in setOf("unresolved", "dynamic")) {
+            "openGraph"
+        } else {
+            "navigate"
+        }
+        sb.append("  click '${sign(itemMap["sign"] ?: return)}' call $action(\"$link\")")
         sb.append("\n\n")
         sb.append("  class ${sign(itemMap["sign"] ?: return)} searchMethod\n\n")
         val statusClass = when (itemMap["status"]) {
@@ -158,6 +163,9 @@ $src
 ${GraphSearchHtml.fragment()}
 $mermaidLink
 <script>
+  function openGraph(link) {
+    callJava('openGraph:' + link)
+  }
   function navigate(link) {
     callJava('navigate:' + link)
   }

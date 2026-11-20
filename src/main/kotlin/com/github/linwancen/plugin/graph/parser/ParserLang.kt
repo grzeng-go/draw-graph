@@ -11,6 +11,7 @@ import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.PsiManager
 import com.intellij.psi.util.PsiTreeUtil
 
@@ -30,6 +31,36 @@ abstract class ParserLang<F : PsiElement> : Parser() {
     protected abstract fun classMap(func: F, relData: RelData): MutableMap<String, String>?
 
     protected abstract fun callList(func: F, call: Boolean): List<F>
+
+    override fun graphClassInfo(element: PsiElement): Pair<String, String> {
+        val func = PsiTreeUtil.getParentOfType(element, funClass(), false)
+            ?: PsiTreeUtil.findChildOfType(element, funClass())
+        val classInfo = func?.let { classMap(it, RelData()) }
+        val filePath = element.containingFile?.virtualFile?.path
+        if (classInfo == null) {
+            val containers = generateSequence(element as PsiElement?) { it.parent }
+                .filter { candidate ->
+                    candidate is PsiNamedElement && listOf(
+                        "class", "interface", "object", "enum", "struct", "namespace", "module",
+                    ).any { candidate.javaClass.simpleName.contains(it, ignoreCase = true) }
+                }
+                .mapNotNull { (it as PsiNamedElement).name }
+                .toList()
+                .asReversed()
+            if (containers.isNotEmpty()) {
+                val name = containers.last()
+                return "${filePath ?: ""}#${containers.joinToString(".")}" to name
+            }
+        }
+        val key = classInfo?.get("sign")
+            ?: func?.let { toSign(it) }
+            ?: filePath
+            ?: element.text
+        val name = classInfo?.get("name")
+            ?: element.containingFile?.name?.let { it.substringBeforeLast('.', it) }
+            ?: key
+        return key to name
+    }
 
     protected open fun callOccurrences(func: F): List<CallOccurrence<F>> =
         callList(func, true).map { CallOccurrence(it, null, null, null) }

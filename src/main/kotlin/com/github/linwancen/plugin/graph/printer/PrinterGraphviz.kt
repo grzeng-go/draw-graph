@@ -79,7 +79,12 @@ graph [compound=true, ordering=out]
         if (isItem) {
             js.append("  document.getElementById(\"$id\").classList.add(\"searchMethod\")\n")
         }
-        js.append("  document.getElementById(\"$id\").onclick = function(){ navigate(\"${map["link"]}\") }\n")
+        val action = if (isItem && map["status"] !in setOf("unresolved", "dynamic")) {
+            "openGraph"
+        } else {
+            "navigate"
+        }
+        js.append("  document.getElementById(\"$id\").onclick = function(){ $action(\"${map["link"]}\") }\n")
     }
 
     override fun call(usageSign: String, callSign: String) {
@@ -166,6 +171,9 @@ $svg
 ${GraphSearchHtml.fragment()}
 <br>
 <script>
+  function openGraph(link) {
+    callJava('openGraph:' + link)
+  }
   function navigate(link) {
     callJava('navigate:' + link)
   }
