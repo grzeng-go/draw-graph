@@ -41,27 +41,6 @@ object GraphSearchHtml {
     let matches = [];
     let current = -1;
 
-    function pointNearNode(path, rect) {
-      try {
-        const length = path.getTotalLength();
-        const matrix = path.getScreenCTM();
-        if (!length || !matrix) return false;
-        const svg = path.ownerSVGElement;
-        const near = point => {
-          const screenPoint = svg.createSVGPoint();
-          screenPoint.x = point.x;
-          screenPoint.y = point.y;
-          const transformed = screenPoint.matrixTransform(matrix);
-          const margin = 28;
-          return transformed.x >= rect.left - margin && transformed.x <= rect.right + margin &&
-            transformed.y >= rect.top - margin && transformed.y <= rect.bottom + margin;
-        };
-        return [0, 0.02, 0.05, 0.95, 0.98, 1].some(ratio => near(path.getPointAtLength(length * ratio)));
-      } catch (_) {
-        return false;
-      }
-    }
-
     function highlightEdgeLabel(svg, path, edge) {
       if (edge.matches('g.edge')) {
         const labels = edge.querySelectorAll('text, tspan');
@@ -82,41 +61,8 @@ object GraphSearchHtml {
         }
       }
 
-      try {
-        const length = path.getTotalLength();
-        const matrix = path.getScreenCTM();
-        if (!length || !matrix) return;
-        const svgPoint = svg.createSVGPoint();
-        const points = Array.from({ length: 41 }, (_, index) => {
-          const point = path.getPointAtLength(length * index / 40);
-          svgPoint.x = point.x;
-          svgPoint.y = point.y;
-          const screenPoint = svgPoint.matrixTransform(matrix);
-          return { x: screenPoint.x, y: screenPoint.y };
-        });
-        const labels = Array.from(svg.querySelectorAll('g.edgeLabel, text'))
-          .filter(label => !label.closest('.searchMethod, .node, [id^="elem_"], [id^="cluster_"]'));
-        let nearest = null;
-        let nearestDistance = 36;
-        labels.forEach(label => {
-          const rect = label.getBoundingClientRect();
-          const distance = points.reduce((minimum, point) => {
-            const dx = Math.max(rect.left - point.x, 0, point.x - rect.right);
-            const dy = Math.max(rect.top - point.y, 0, point.y - rect.bottom);
-            return Math.min(minimum, Math.sqrt(dx * dx + dy * dy));
-          }, Number.POSITIVE_INFINITY);
-          if (distance < nearestDistance) {
-            nearest = label;
-            nearestDistance = distance;
-          }
-        });
-        if (nearest) {
-          const labelGroup = nearest.closest('g.edgeLabel') || nearest;
-          labelGroup.classList.add('dg-related-edge-label');
-          labelGroup.querySelectorAll('text, tspan').forEach(label => label.classList.add('dg-related-edge-label'));
-        }
-      } catch (_) {
-        // SVG text geometry is not available before the browser finishes layout.
+      if (edge.matches('g.link')) {
+        edge.querySelectorAll('text, tspan').forEach(label => label.classList.add('dg-related-edge-label'));
       }
     }
 
@@ -132,13 +78,13 @@ object GraphSearchHtml {
       const nodeTitle = nodeTitleElement ? nodeTitleElement.textContent.trim() : null;
       const flowchartId = node.id.match(/^flowchart-(.*)-\d+$/);
       const mermaidNodeId = flowchartId ? flowchartId[1] : null;
-      const rect = node.getBoundingClientRect();
+      const plantUmlNodeId = node.id.startsWith('elem_') ? node.id.substring(5) : null;
       const paths = Array.from(svg.querySelectorAll('path')).filter(path => !path.closest('.searchMethod'));
       const highlighted = new Set();
 
       paths.forEach(path => {
         const edge = path.closest('g.edge, g.edgePath, g.link') || path;
-        let connected = pointNearNode(path, rect);
+        let connected = false;
         if (edge.matches('g.edge') && nodeTitle) {
           const edgeTitle = edge.querySelector('title');
           const title = edgeTitle ? edgeTitle.textContent : '';
@@ -147,6 +93,10 @@ object GraphSearchHtml {
           connected = Array.from(edge.classList).some(edgeClass =>
             edgeClass === 'LS-' + mermaidNodeId || edgeClass === 'LE-' + mermaidNodeId
           );
+        } else if (edge.matches('g.link') && plantUmlNodeId) {
+          const edgeId = edge.id;
+          connected = edgeId.startsWith('link_' + plantUmlNodeId + '_') ||
+            edgeId.endsWith('_' + plantUmlNodeId);
         }
         if (connected) highlighted.add(edge);
       });
