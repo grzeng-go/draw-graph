@@ -29,6 +29,15 @@ abstract class Parser {
         indicator: ProgressIndicator?
     ) {}
 
+    open fun classImpl(
+        project: Project,
+        relData: RelData,
+        psiElement: PsiElement,
+        indicator: ProgressIndicator?,
+    ) {
+        callImpl(project, relData, psiElement, true, indicator)
+    }
+
     open fun nameToElementImpl(project: Project, name: String): PsiElement? {
         return null
     }
@@ -110,6 +119,12 @@ abstract class Parser {
             language.baseLanguage?.let { language = it }
             val usageService = parserMap[language.id] ?: return
             usageService.callImpl(project, relData, psiElement, call, indicator)
+        }
+
+        @JvmStatic
+        fun classGraph(project: Project, relData: RelData, psiElement: PsiElement, indicator: ProgressIndicator?) {
+            val parser = findParser(psiElement, parserMap()) ?: return
+            parser.classImpl(project, relData, psiElement, indicator)
         }
 
         /**

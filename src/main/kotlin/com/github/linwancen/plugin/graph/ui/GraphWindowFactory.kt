@@ -54,7 +54,7 @@ class GraphWindowFactory : ToolWindowFactory {
                 val (file, offset) = source
                 val target = host.openClassTab(info.first, info.second, file, offset)
                 host.toolWindow.activate(null)
-                RelController.forElement(project, target, targetElement, call)
+                RelController.forClass(project, target, targetElement)
             }
         }
 

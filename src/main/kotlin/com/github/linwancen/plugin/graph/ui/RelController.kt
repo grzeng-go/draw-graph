@@ -25,6 +25,7 @@ object RelController {
     private sealed class GraphRequest {
         data class Files(val files: Array<VirtualFile>) : GraphRequest()
         data class Element(val element: PsiElement, val call: Boolean) : GraphRequest()
+        data class ClassElement(val element: PsiElement) : GraphRequest()
         data class InjectedElement(val element: PsiElement) : GraphRequest()
     }
 
@@ -43,6 +44,7 @@ object RelController {
         when (val request = requestByWindow[target] ?: return) {
             is GraphRequest.Files -> forFile(project, target, request.files, false)
             is GraphRequest.Element -> forElement(project, target, request.element, request.call)
+            is GraphRequest.ClassElement -> forClass(project, target, request.element)
             is GraphRequest.InjectedElement -> forInjectedElement(project, target, request.element)
         }
     }
@@ -149,6 +151,29 @@ object RelController {
             }.queue()
         } catch (e: Throwable) {
             LOG.info("RelController.forElement() catch Throwable but log to record.", e)
+        }
+    }
+
+    @JvmStatic
+    fun forClass(project: Project, window: GraphWindow, psiElement: PsiElement) {
+        try {
+            requestByWindow[window] = GraphRequest.ClassElement(psiElement)
+            ToolWindowManager.getInstance(project).getToolWindow("Graph")?.activate(null)
+            object : Task.Backgroundable(project, "draw class graph") {
+                override fun run(indicator: ProgressIndicator) {
+                    try {
+                        val relData = RelData()
+                        DumbService.getInstance(project).runReadActionInSmartMode {
+                            Parser.classGraph(project, relData, psiElement, indicator)
+                        }
+                        RelDataController.dataToWindow(project, window, relData, true)
+                    } catch (e: Throwable) {
+                        LOG.info("RelController.forClass() Thread catch Throwable but log to record.", e)
+                    }
+                }
+            }.queue()
+        } catch (e: Throwable) {
+            LOG.info("RelController.forClass() catch Throwable but log to record.", e)
         }
     }
 

@@ -25,6 +25,7 @@ import java.awt.event.FocusEvent;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Component;
+import java.awt.Insets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
@@ -209,12 +210,33 @@ public class GraphWindow {
         page.sourceOffset = offset;
         classGraphWindows.put(key, page);
         classTabs.addTab(title, page.graphTabs);
+        classTabs.setTabComponentAt(classTabs.indexOfComponent(page.graphTabs), createTabHeader(key, title, page));
         selectingClassTab = true;
         classTabs.setSelectedComponent(page.graphTabs);
         selectingClassTab = false;
         trimClassTabs();
         page.navigateToSource();
         return page;
+    }
+
+    private JPanel createTabHeader(String key, String title, GraphWindow page) {
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        header.setOpaque(false);
+        JLabel label = new JLabel(title);
+        JButton close = new JButton("x");
+        close.setFocusable(false);
+        close.setMargin(new Insets(0, 4, 0, 4));
+        close.setToolTipText("Close");
+        close.addActionListener(event -> closeClassTab(key, page));
+        header.add(label);
+        header.add(close);
+        return header;
+    }
+
+    private void closeClassTab(String key, GraphWindow page) {
+        classTabs.remove(page.graphTabs);
+        classGraphWindows.remove(key);
+        page.disposePage();
     }
 
     public GraphWindow selectedGraphWindow() {

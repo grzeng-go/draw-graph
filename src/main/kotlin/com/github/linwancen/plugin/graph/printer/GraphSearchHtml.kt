@@ -17,7 +17,7 @@ object GraphSearchHtml {
   .dg-search-current > rect, .dg-search-current > polygon, .dg-search-current > ellipse, .dg-search-current > path { stroke: #f44336 !important; stroke-width: 5px !important; }
   .dg-selected-method > rect, .dg-selected-method > polygon, .dg-selected-method > ellipse, .dg-selected-method > path { stroke: #1565c0 !important; stroke-width: 5px !important; }
   .dg-related-edge path, .dg-related-edge polygon, path.dg-related-edge { stroke: #e53935 !important; stroke-width: 3px !important; }
-  .dg-related-edge text, .dg-related-edge tspan, .dg-related-edge-label, .dg-related-edge-label text, .dg-related-edge-label tspan { fill: #e53935 !important; color: #e53935 !important; font-weight: bold !important; }
+  .dg-related-edge text, .dg-related-edge tspan, .dg-related-edge-label, .dg-related-edge-label text, .dg-related-edge-label tspan { fill: #e53935 !important; color: #e53935 !important; stroke: #e53935 !important; font-weight: bold !important; }
 </style>
 <div class="dg-search-toolbar">
   <input id="dg-search-input" type="search" placeholder="$search" aria-label="$search">
@@ -54,9 +54,23 @@ object GraphSearchHtml {
     }
 
     function highlightEdgeLabel(svg, path, edge) {
-      if (edge !== path && edge.querySelector('text')) {
-        edge.classList.add('dg-related-edge');
-        return;
+      if (edge.matches('g.edge')) {
+        const labels = edge.querySelectorAll('text, tspan');
+        if (labels.length) {
+          labels.forEach(label => label.classList.add('dg-related-edge-label'));
+          return;
+        }
+      }
+
+      if (edge.matches('g.edgePath')) {
+        const edgePaths = Array.from(svg.querySelectorAll('g.edgePath'));
+        const edgeLabels = Array.from(svg.querySelectorAll('g.edgeLabel'));
+        const index = edgePaths.indexOf(edge);
+        const label = edgeLabels[index];
+        if (label) {
+          label.classList.add('dg-related-edge-label');
+          return;
+        }
       }
 
       try {
@@ -90,6 +104,7 @@ object GraphSearchHtml {
         if (nearest) {
           const labelGroup = nearest.closest('g.edgeLabel') || nearest;
           labelGroup.classList.add('dg-related-edge-label');
+          labelGroup.querySelectorAll('text, tspan').forEach(label => label.classList.add('dg-related-edge-label'));
         }
       } catch (_) {
         // SVG text geometry is not available before the browser finishes layout.

@@ -114,10 +114,14 @@ abstract class ParserLang<F : PsiElement> : Parser() {
 
     fun fileImpl(
         psiFile: PsiFile, state: DrawGraphProjectState, file: VirtualFile,
-        relData: RelData, callSetMap: MutableMap<String, MutableSet<String>>
+        relData: RelData, callSetMap: MutableMap<String, MutableSet<String>>,
+        classSignFilter: String? = null,
     ) {
         val funcs = PsiTreeUtil.findChildrenOfType(psiFile, funClass())
         for (func in funcs) {
+            if (classSignFilter != null && classMap(func, relData)?.get("sign") != classSignFilter) {
+                continue
+            }
             val sign = funcSign(state, func, file, relData) ?: continue
             // override fun
             val callSet = callSetMap.computeIfAbsent(sign) { mutableSetOf() }
@@ -334,6 +338,22 @@ abstract class ParserLang<F : PsiElement> : Parser() {
                 level,
             )
         }
+        regCall(callSetMap, relData, true)
+    }
+
+    override fun classImpl(
+        project: Project,
+        relData: RelData,
+        psiElement: PsiElement,
+        indicator: ProgressIndicator?,
+    ) {
+        val func = graphTarget(psiElement) as? F ?: return
+        val file = func.containingFile ?: return
+        val virtualFile = file.virtualFile ?: return
+        val state = DrawGraphProjectState.of(project)
+        val classSign = classMap(func, relData)?.get("sign")
+        val callSetMap = mutableMapOf<String, MutableSet<String>>()
+        fileImpl(file, state, virtualFile, relData, callSetMap, classSign)
         regCall(callSetMap, relData, true)
     }
 
