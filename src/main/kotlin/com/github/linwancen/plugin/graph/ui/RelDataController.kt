@@ -17,6 +17,7 @@ object RelDataController {
         relData: RelData,
         isCall: Boolean,
     ) {
+        window.selectedMethodName = relData.selectedNodeName
         RelData2Effect().save(project, relData, isCall) { set, s ->
             runInEdt {
                 window.toolWindow.activate(null)
@@ -55,13 +56,13 @@ object RelDataController {
             window.plantumlSrc.text = plantumlSrc
             window.graphvizSrc.text = graphvizSrc
         }
-        PrinterPlantuml.build(PrinterData(plantumlSrc, plantumlJs, project)) {
+        PrinterPlantuml.build(PrinterData(plantumlSrc, plantumlJs, project, relData.selectedNodeName)) {
             update(it, window.plantumlHtml, window.plantumlBrowser)
         }
-        PrinterMermaid.build(PrinterData(mermaidSrc, null, project)) {
+        PrinterMermaid.build(PrinterData(mermaidSrc, null, project, relData.selectedNodeName)) {
             update(it, window.mermaidHtml, window.mermaidBrowser)
         }
-        PrinterGraphviz.build(PrinterData(graphvizSrc, graphvizJs, project)) {
+        PrinterGraphviz.build(PrinterData(graphvizSrc, graphvizJs, project, relData.selectedNodeName)) {
             update(it, window.graphvizHtml, window.graphvizBrowser)
         }
     }

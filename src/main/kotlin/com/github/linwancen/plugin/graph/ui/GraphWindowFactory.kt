@@ -59,7 +59,7 @@ class GraphWindowFactory : ToolWindowFactory {
         }
 
         @JvmStatic
-        fun openFileTab(project: Project, file: VirtualFile) {
+        fun openFileTab(project: Project, file: VirtualFile, refreshExisting: Boolean = false) {
             ApplicationManager.getApplication().invokeLater {
                 if (project.isDisposed || !file.isValid) return@invokeLater
                 val host = winMap[project] ?: return@invokeLater
@@ -80,7 +80,7 @@ class GraphWindowFactory : ToolWindowFactory {
                 val existing = host.findClassTab(info.first)
                 val page = host.openClassTab(info.first, info.second, file, validOffset)
                 host.toolWindow.activate(null)
-                if (existing == null) {
+                if (existing == null || refreshExisting) {
                     RelController.forFile(project, page, arrayOf(file), true)
                 }
             }
@@ -90,6 +90,31 @@ class GraphWindowFactory : ToolWindowFactory {
         fun openSelectedFile(project: Project) {
             val editor = FileEditorManager.getInstance(project).selectedEditor ?: return
             openFileTab(project, editor.file ?: return)
+        }
+
+        @JvmStatic
+        fun refreshSelectedEditor(project: Project) {
+            ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed) return@invokeLater
+                val editorManager = FileEditorManager.getInstance(project)
+                val editor = editorManager.selectedTextEditor ?: return@invokeLater
+                val file = editorManager.selectedEditor?.file ?: return@invokeLater
+                val offset = editor.caretModel.offset
+                val element = ApplicationManager.getApplication().runReadAction(
+                    Computable<PsiElement?> {
+                        val psiFile = PsiManager.getInstance(project).findFile(file) ?: return@Computable null
+                        psiFile.findElementAt(offset) ?: psiFile
+                    },
+                ) ?: return@invokeLater
+                val method = ApplicationManager.getApplication().runReadAction(
+                    Computable<PsiElement?> { Parser.graphTarget(project, element) },
+                )
+                if (method != null) {
+                    openMethodTab(project, method, true)
+                } else {
+                    openFileTab(project, file, true)
+                }
+            }
         }
 
         @JvmStatic

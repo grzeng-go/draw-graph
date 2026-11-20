@@ -121,7 +121,7 @@ skinparam defaultTextAlignment center
                             """
 <!-- <embed src="file:///${path}/plantuml.svg" type="image/svg+xml" /> -->
 $svg
-${GraphSearchHtml.fragment()}
+${GraphSearchHtml.fragment(data.selectedMethod)}
 <br>
 $svgDesc
 <br>

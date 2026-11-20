@@ -9,4 +9,5 @@ class PrinterData(
     var src: String?,
     var js: String?,
     var project: Project,
+    var selectedMethod: String? = null,
 )

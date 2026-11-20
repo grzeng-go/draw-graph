@@ -352,6 +352,9 @@ abstract class ParserLang<F : PsiElement> : Parser() {
         val virtualFile = file.virtualFile ?: return
         val state = DrawGraphProjectState.of(project)
         val classSign = classMap(func, relData)?.get("sign")
+        val selectedMethod = mutableMapOf<String, String>()
+        funMap(selectedMethod, func)
+        relData.selectedNodeName = selectedMethod["name"]
         val callSetMap = mutableMapOf<String, MutableSet<String>>()
         fileImpl(file, state, virtualFile, relData, callSetMap, classSign)
         regCall(callSetMap, relData, true)

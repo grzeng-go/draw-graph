@@ -24,6 +24,7 @@ class RelData {
     val callRelations = mutableListOf<CallRelation>()
     var callTreeRootSign: String? = null
     var callTreeForward: Boolean = true
+    var selectedNodeName: String? = null
 
     fun regParentChild(parentMap: MutableMap<String, String>, childMap: MutableMap<String, String>? = null) {
         val parent = parentMap["sign"] ?: return

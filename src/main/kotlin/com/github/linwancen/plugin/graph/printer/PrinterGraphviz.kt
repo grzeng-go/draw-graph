@@ -168,7 +168,7 @@ graph [compound=true, ordering=out]
                             """
 <!-- <embed src="file:///$path/graphviz.dot.svg" type="image/svg+xml" /> -->
 $svg
-${GraphSearchHtml.fragment()}
+${GraphSearchHtml.fragment(data.selectedMethod)}
 <br>
 <script>
   function openGraph(link) {

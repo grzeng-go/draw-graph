@@ -126,13 +126,13 @@ classDef dynamicNode fill:#e0f7fa,stroke:#00838f,stroke-dasharray: 4 3
 <!-- https://cdn.jsdelivr.net/npm/mermaid@9.4.3/dist/mermaid.js -->
 <!-- change it in DrawGraphSetting.properties -->
 <script src="${appState.mermaidOffline}"></script>
-"""
+""", data.selectedMethod
                     )
                     // language="html"
                     val online = temp(
                         src, """
 <script src="${appState.mermaidOnline}"></script>
-"""
+""", data.selectedMethod
                     )
                     val path = appState.tempPath
                     try {
@@ -154,13 +154,13 @@ classDef dynamicNode fill:#e0f7fa,stroke:#00838f,stroke-dasharray: 4 3
             }.queue()
         }
 
-        private fun temp(src: String?, mermaidLink: String?): String {
+        private fun temp(src: String?, mermaidLink: String?, selectedMethod: String?): String {
             // language="html"
             val online = """<pre class="mermaid">
 
 $src
 </pre>
-${GraphSearchHtml.fragment()}
+${GraphSearchHtml.fragment(selectedMethod)}
 $mermaidLink
 <script>
   function openGraph(link) {

@@ -10,6 +10,7 @@ import com.github.linwancen.plugin.graph.settings.DrawGraphAppState;
 import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState;
 import com.github.linwancen.plugin.graph.ui.webview.Browser;
 import com.github.linwancen.plugin.graph.ui.webview.BrowserFactory;
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -23,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.event.FocusEvent;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Component;
 import java.awt.Insets;
@@ -45,6 +47,7 @@ public class GraphWindow {
     private int sourceOffset;
     private boolean selectingClassTab;
     private static final int MAX_CLASS_TABS = 10;
+    public String selectedMethodName;
 
     public GraphWindow(@NotNull Project project, ToolWindow toolWindow) {
         this(project, toolWindow, true);
@@ -58,7 +61,7 @@ public class GraphWindow {
         projectState = DrawGraphProjectState.of(project);
 
         openDir.addActionListener(e -> InstallMermaid.openDir(project));
-        reload.addActionListener(e -> RelController.reload(project, this));
+        reload.addActionListener(e -> GraphWindowFactory.refreshSelectedEditor(project));
         reset.addActionListener(e -> resetCurrentGraph());
 
         autoLoad.setSelected(primary);
@@ -220,12 +223,21 @@ public class GraphWindow {
     }
 
     private JPanel createTabHeader(String key, String title, GraphWindow page) {
-        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         header.setOpaque(false);
         JLabel label = new JLabel(title);
-        JButton close = new JButton("x");
+        JButton close = new JButton(AllIcons.Actions.Close);
         close.setFocusable(false);
-        close.setMargin(new Insets(0, 4, 0, 4));
+        close.setMargin(new Insets(0, 0, 0, 0));
+        close.setBorder(BorderFactory.createEmptyBorder());
+        close.setContentAreaFilled(false);
+        close.setBorderPainted(false);
+        close.setRolloverEnabled(true);
+        close.setRolloverIcon(AllIcons.Actions.CloseHovered);
+        close.setPreferredSize(new Dimension(
+                AllIcons.Actions.Close.getIconWidth(),
+                AllIcons.Actions.Close.getIconHeight()
+        ));
         close.setToolTipText("Close");
         close.addActionListener(event -> closeClassTab(key, page));
         header.add(label);
@@ -306,7 +318,8 @@ public class GraphWindow {
 
     private void initEvent(@NotNull JTextArea src, @NotNull JTextArea html, @Nullable Browser browser,
                            @NotNull BiConsumer<PrinterData, Consumer<String>> fun, boolean renderExisting) {
-        @NotNull Consumer<FocusEvent> htmlAndOut = e -> fun.accept(new PrinterData(src.getText(), null, project),
+        @NotNull Consumer<FocusEvent> htmlAndOut = e -> fun.accept(
+                new PrinterData(src.getText(), null, project, selectedMethodName),
                 s -> EdtExecutorService.getInstance().submit(() -> {
                     html.setText(s);
                     if (browser != null) browser.load(s);

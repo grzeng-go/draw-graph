@@ -4,10 +4,18 @@ import com.github.linwancen.plugin.graph.ui.DrawGraphBundle
 
 object GraphSearchHtml {
 
-    fun fragment(): String {
+    fun fragment(selectedMethod: String? = null): String {
         val search = DrawGraphBundle.message("graph.search")
         val previous = DrawGraphBundle.message("graph.search.previous")
         val next = DrawGraphBundle.message("graph.search.next")
+        val selectedMethodLiteral = selectedMethod?.let {
+            "\"" + it
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                .replace("<", "\\u003c") + "\""
+        } ?: "null"
         return """
 <style>
   .dg-search-toolbar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; box-sizing: border-box; display: flex; gap: 6px; align-items: center; padding: 6px; background: #f5f5f5; }
@@ -15,6 +23,7 @@ object GraphSearchHtml {
   .dg-search-toolbar button { padding: 4px 8px; }
   .dg-search-match > rect, .dg-search-match > polygon, .dg-search-match > ellipse, .dg-search-match > path { stroke: #ff9800 !important; stroke-width: 3px !important; }
   .dg-search-current > rect, .dg-search-current > polygon, .dg-search-current > ellipse, .dg-search-current > path { stroke: #f44336 !important; stroke-width: 5px !important; }
+  .dg-selected-method { filter: drop-shadow(0 0 6px #1565c0); }
   .dg-selected-method > rect, .dg-selected-method > polygon, .dg-selected-method > ellipse, .dg-selected-method > path { stroke: #1565c0 !important; stroke-width: 5px !important; }
   .dg-related-edge path, .dg-related-edge polygon, path.dg-related-edge { stroke: #e53935 !important; stroke-width: 3px !important; }
   .dg-related-edge text, .dg-related-edge tspan, .dg-related-edge-label, .dg-related-edge-label text, .dg-related-edge-label tspan { fill: #e53935 !important; color: #e53935 !important; stroke: #e53935 !important; font-weight: bold !important; }
@@ -146,6 +155,51 @@ object GraphSearchHtml {
         const edge = path.closest('g.edge, g.edgePath, g.link') || path;
         if (highlighted.has(edge)) highlightEdgeLabel(svg, path, edge);
       });
+    }
+
+    function selectRequestedMethod() {
+      const requestedName = $selectedMethodLiteral;
+      if (!requestedName) return false;
+      const normalize = value => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      const normalizedName = normalize(requestedName);
+      const candidates = Array.from(document.querySelectorAll('.searchMethod'))
+        .filter(node => normalize(node.textContent).includes(normalizedName))
+        .sort((left, right) => left.textContent.length - right.textContent.length);
+      if (!candidates.length) return false;
+      const node = candidates[0];
+      requestAnimationFrame(() => {
+        highlightRelated(node);
+        node.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      });
+      return true;
+    }
+
+    if ($selectedMethodLiteral !== null) {
+      let attempts = 0;
+      let retryTimer = null;
+      const stopSelecting = () => {
+        observer.disconnect();
+        if (retryTimer !== null) clearTimeout(retryTimer);
+      };
+      const observer = new MutationObserver(() => {
+        if (selectRequestedMethod()) stopSelecting();
+      });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class']
+      });
+      const retrySelection = () => {
+        if (selectRequestedMethod()) {
+          stopSelecting();
+        } else if (++attempts < 60) {
+          retryTimer = setTimeout(retrySelection, 100);
+        } else {
+          stopSelecting();
+        }
+      };
+      retrySelection();
     }
 
     document.addEventListener('click', event => {
