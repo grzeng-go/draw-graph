@@ -61,7 +61,7 @@ object GraphSearchHtml {
         }
       }
 
-      if (edge.matches('g.link')) {
+      if (edge.matches('g[id^="link_"]')) {
         edge.querySelectorAll('text, tspan').forEach(label => label.classList.add('dg-related-edge-label'));
       }
     }
@@ -83,7 +83,7 @@ object GraphSearchHtml {
       const highlighted = new Set();
 
       paths.forEach(path => {
-        const edge = path.closest('g.edge, g.edgePath, g.link') || path;
+        const edge = path.closest('g.edge, g.edgePath, g.link, g[id^="link_"]') || path;
         let connected = false;
         if (edge.matches('g.edge') && nodeTitle) {
           const edgeTitle = edge.querySelector('title');
@@ -93,7 +93,7 @@ object GraphSearchHtml {
           connected = Array.from(edge.classList).some(edgeClass =>
             edgeClass === 'LS-' + mermaidNodeId || edgeClass === 'LE-' + mermaidNodeId
           );
-        } else if (edge.matches('g.link') && plantUmlNodeId) {
+        } else if (edge.matches('g[id^="link_"]') && plantUmlNodeId) {
           const edgeId = edge.id;
           connected = edgeId.startsWith('link_' + plantUmlNodeId + '_') ||
             edgeId.endsWith('_' + plantUmlNodeId);
@@ -102,7 +102,7 @@ object GraphSearchHtml {
       });
       highlighted.forEach(edge => edge.classList.add('dg-related-edge'));
       paths.forEach(path => {
-        const edge = path.closest('g.edge, g.edgePath, g.link') || path;
+        const edge = path.closest('g.edge, g.edgePath, g.link, g[id^="link_"]') || path;
         if (highlighted.has(edge)) highlightEdgeLabel(svg, path, edge);
       });
     }
