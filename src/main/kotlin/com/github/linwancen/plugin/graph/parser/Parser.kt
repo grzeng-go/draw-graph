@@ -39,6 +39,8 @@ abstract class Parser {
         return (file?.path ?: name) to name
     }
 
+    open fun graphTarget(element: PsiElement): PsiElement? = element
+
     companion object {
         private val log = LoggerFactory.getLogger(this::class.java)
 
@@ -133,6 +135,12 @@ abstract class Parser {
                 element.containingFile?.name?.let { it.substringBeforeLast('.', it) } ?: "Graph",
             )
             return parser.graphClassInfo(element)
+        }
+
+        @JvmStatic
+        fun graphTarget(project: Project, element: PsiElement): PsiElement? {
+            val parser = findParser(element, parserMap()) ?: return element
+            return parser.graphTarget(element)
         }
     }
 

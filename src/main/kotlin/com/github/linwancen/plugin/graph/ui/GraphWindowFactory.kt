@@ -40,21 +40,21 @@ class GraphWindowFactory : ToolWindowFactory {
                         ?.activate { openMethodTab(project, element, call) }
                     return@invokeLater
                 }
-                val (info, file, offset) = ApplicationManager.getApplication().runReadAction(
-                    Computable<Triple<Pair<String, String>, VirtualFile?, Int>> {
+                val resolved = ApplicationManager.getApplication().runReadAction(
+                    Computable<Triple<PsiElement, Pair<String, String>, Pair<VirtualFile?, Int>>?> {
+                        val methodTarget = Parser.graphTarget(project, element) ?: return@Computable null
                         Triple(
-                            Parser.graphClassInfo(project, element),
-                            element.containingFile?.virtualFile,
-                            element.textOffset,
+                            methodTarget,
+                            Parser.graphClassInfo(project, methodTarget),
+                            methodTarget.containingFile?.virtualFile to methodTarget.textOffset,
                         )
                     },
-                )
-                val page = host.findClassTab(info.first)
+                ) ?: return@invokeLater
+                val (targetElement, info, source) = resolved
+                val (file, offset) = source
                 val target = host.openClassTab(info.first, info.second, file, offset)
                 host.toolWindow.activate(null)
-                if (page == null) {
-                    RelController.forElement(project, target, element, call)
-                }
+                RelController.forElement(project, target, targetElement, call)
             }
         }
 

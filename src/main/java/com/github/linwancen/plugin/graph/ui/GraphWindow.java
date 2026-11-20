@@ -142,7 +142,7 @@ public class GraphWindow {
         if (primary) {
             setupClassTabs();
         } else {
-            initOut(project);
+            initOut(project, false);
         }
     }
 
@@ -151,11 +151,15 @@ public class GraphWindow {
     }
 
     private void initOut(Project project) {
+        initOut(project, true);
+    }
+
+    private void initOut(Project project, boolean renderExisting) {
         disposeBrowsers();
         plantumlBrowser = BrowserFactory.of(plantumlOut, project);
         mermaidBrowser = BrowserFactory.of(mermaidOut, project);
         graphvizBrowser = BrowserFactory.of(graphvizOut, project);
-        initSrc();
+        initSrc(renderExisting);
     }
 
     private void disposeBrowsers() {
@@ -267,26 +271,27 @@ public class GraphWindow {
     private void resetCurrentGraph() {
         GraphWindow selected = primary ? selectedGraphWindow() : this;
         if (selected != null) {
-            selected.initOut(project);
+            selected.initOut(project, false);
             RelController.reload(project, selected);
         }
     }
 
-    private void initSrc() {
-        initEvent(plantumlSrc, plantumlHtml, plantumlBrowser, PrinterPlantuml::build);
-        initEvent(mermaidSrc, mermaidHtml, mermaidBrowser, PrinterMermaid::build);
-        initEvent(graphvizSrc, graphvizHtml, graphvizBrowser, PrinterGraphviz::build);
+    private void initSrc(boolean renderExisting) {
+        initEvent(plantumlSrc, plantumlHtml, plantumlBrowser, PrinterPlantuml::build, renderExisting);
+        initEvent(mermaidSrc, mermaidHtml, mermaidBrowser, PrinterMermaid::build, renderExisting);
+        initEvent(graphvizSrc, graphvizHtml, graphvizBrowser, PrinterGraphviz::build, renderExisting);
     }
 
     private void initEvent(@NotNull JTextArea src, @NotNull JTextArea html, @Nullable Browser browser,
-                           @NotNull BiConsumer<PrinterData, Consumer<String>> fun) {
+                           @NotNull BiConsumer<PrinterData, Consumer<String>> fun, boolean renderExisting) {
         @NotNull Consumer<FocusEvent> htmlAndOut = e -> fun.accept(new PrinterData(src.getText(), null, project),
                 s -> EdtExecutorService.getInstance().submit(() -> {
                     html.setText(s);
                     if (browser != null) browser.load(s);
                 }));
-        // reset browser load
-        ApplicationManager.getApplication().executeOnPooledThread(() -> htmlAndOut.accept(null));
+        if (renderExisting && !src.getText().isBlank()) {
+            ApplicationManager.getApplication().executeOnPooledThread(() -> htmlAndOut.accept(null));
+        }
 
         UiUtils.onFocusLost(src, project, htmlAndOut);
         UiUtils.onFocusLost(html, project, e -> EdtExecutorService.getInstance().submit(() -> {

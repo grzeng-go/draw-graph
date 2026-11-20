@@ -32,6 +32,25 @@ abstract class ParserLang<F : PsiElement> : Parser() {
 
     protected abstract fun callList(func: F, call: Boolean): List<F>
 
+    override fun graphTarget(element: PsiElement): PsiElement? {
+        PsiTreeUtil.getParentOfType(element, funClass(), false)?.let { return it }
+        PsiTreeUtil.findChildOfType(element, funClass())?.let { return it }
+        val offset = element.textOffset
+        return element.containingFile?.let { file ->
+            var nearest: F? = null
+            var nearestDistance = Int.MAX_VALUE
+            val functions: Collection<F> = PsiTreeUtil.findChildrenOfType(file, funClass())
+            for (func in functions) {
+                val distance = kotlin.math.abs(func.textOffset - offset)
+                if (distance < nearestDistance) {
+                    nearest = func
+                    nearestDistance = distance
+                }
+            }
+            nearest?.takeIf { nearestDistance <= 256 }
+        }
+    }
+
     override fun graphClassInfo(element: PsiElement): Pair<String, String> {
         val func = PsiTreeUtil.getParentOfType(element, funClass(), false)
             ?: PsiTreeUtil.findChildOfType(element, funClass())
