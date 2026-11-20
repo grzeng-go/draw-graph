@@ -52,6 +52,7 @@ class PrinterMermaid : Printer() {
         val link = itemMap["link"]?.replace(")", "") ?: ""
         sb.append("  click '${sign(itemMap["sign"] ?: return)}' call navigate(\"$link\")")
         sb.append("\n\n")
+        sb.append("  class ${sign(itemMap["sign"] ?: return)} searchMethod\n\n")
     }
 
     override fun call(usageSign: String, callSign: String) {
@@ -124,6 +125,7 @@ class PrinterMermaid : Printer() {
 
 $src
 </pre>
+${GraphSearchHtml.fragment()}
 $mermaidLink
 <script>
   function navigate(link) {

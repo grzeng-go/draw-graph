@@ -58,6 +58,9 @@ skinparam defaultTextAlignment center
             sb.append("${map["name"]}\"")
         }
         val id = "${if (isItem) "elem" else "cluster"}_$sign"
+        if (isItem) {
+            js.append("  document.getElementById(\"$id\").classList.add(\"searchMethod\")\n")
+        }
         js.append("  document.getElementById(\"$id\").onclick = function(){ navigate(\"${map["link"]}\") }\n")
     }
 
@@ -99,6 +102,7 @@ skinparam defaultTextAlignment center
                             """
 <!-- <embed src="file:///${path}/plantuml.svg" type="image/svg+xml" /> -->
 $svg
+${GraphSearchHtml.fragment()}
 <br>
 $svgDesc
 <br>

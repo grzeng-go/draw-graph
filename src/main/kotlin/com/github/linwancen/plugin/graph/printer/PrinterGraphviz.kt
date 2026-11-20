@@ -69,6 +69,9 @@ graph [compound=true]
             sb.append(']')
         }
         val id = if (isItem) "node${nodeId++}" else "clust${clusterId++}"
+        if (isItem) {
+            js.append("  document.getElementById(\"$id\").classList.add(\"searchMethod\")\n")
+        }
         js.append("  document.getElementById(\"$id\").onclick = function(){ navigate(\"${map["link"]}\") }\n")
     }
 
@@ -113,6 +116,7 @@ graph [compound=true]
                             """
 <!-- <embed src="file:///$path/graphviz.dot.svg" type="image/svg+xml" /> -->
 $svg
+${GraphSearchHtml.fragment()}
 <br>
 <script>
   function navigate(link) {
