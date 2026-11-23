@@ -924,7 +924,7 @@ private class CallChainPanel(
 
         properties.setValue(
             KEY_MAX_DEPTH,
-            (maxDepthSpinner.value as Number).toInt(),
+            (maxDepthSpinner.value as Number).toInt().toString(),
         )
 
         properties.setValue(
@@ -1436,8 +1436,8 @@ private class CallChainCanvas(
                 )
 
                 g2.font = font.deriveFont(
-                    11f,
                     Font.BOLD,
+                    11f,
                 )
 
                 val metrics = g2.fontMetrics
@@ -1513,26 +1513,26 @@ private class CallChainCanvas(
         val loopWidth = 48
         val loopHeight = 30
 
-        val path = Path2D.Float()
+        val path = Path2D.Double()
 
         path.moveTo(
-            x.toFloat(),
-            y,
+            x.toDouble(),
+            y.toDouble(),
         )
 
         path.lineTo(
-            (x + loopWidth).toFloat(),
-            y,
+            (x + loopWidth).toDouble(),
+            y.toDouble(),
         )
 
         path.lineTo(
-            (x + loopWidth).toFloat(),
-            (y + loopHeight).toFloat(),
+            (x + loopWidth).toDouble(),
+            (y + loopHeight).toDouble(),
         )
 
         path.lineTo(
-            x.toFloat(),
-            (y + loopHeight).toFloat(),
+            x.toDouble(),
+            (y + loopHeight).toDouble(),
         )
 
         g.draw(path)
