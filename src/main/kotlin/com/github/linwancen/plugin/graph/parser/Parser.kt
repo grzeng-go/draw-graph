@@ -65,11 +65,21 @@ abstract class Parser {
             // for 2024.2
             if (parserMap["kotlin"] == null) {
                 try {
+                    Class.forName(
+                        "org.jetbrains.kotlin.psi.KtNamedFunction",
+                        false,
+                        Parser::class.java.classLoader,
+                    )
                     val kotlin = Class.forName("com.github.linwancen.plugin.graph.parser.kotlin.KotlinParser").kotlin
                     val parser = kotlin.createInstance() as Parser
                     parserMap["kotlin"] = parser
                     log.info("add load graph parser kotlin -> {}", parser)
-                } catch (_: Exception) {
+                } catch (_: ClassNotFoundException) {
+                    log.info("skip Kotlin graph parser because Kotlin PSI is unavailable")
+                } catch (e: Exception) {
+                    log.info("skip Kotlin graph parser because it could not be initialized", e)
+                } catch (e: LinkageError) {
+                    log.info("skip Kotlin graph parser because its dependencies are unavailable", e)
                 }
             }
             return parserMap

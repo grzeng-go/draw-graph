@@ -6,7 +6,8 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends optional="true" config-file="java.xml">com.intellij.modules.java</depends>
-    <depends optional="true" config-file="kotlin.xml">org.jetbrains.kotlin</depends>
+    <depends optional="true">org.jetbrains.kotlin</depends>
+    <depends optional="true" config-file="kotlin.xml">com.intellij.modules.kotlin</depends>
     <depends optional="true" config-file="groovy.xml">org.intellij.groovy</depends>
     <!--suppress PluginXmlValidity -->
     <depends optional="true" config-file="scala.xml">org.intellij.scala</depends>
