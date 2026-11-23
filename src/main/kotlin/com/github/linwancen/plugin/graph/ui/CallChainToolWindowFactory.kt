@@ -201,22 +201,25 @@ private object CallChainAnalyzer {
 
         val events = mutableListOf<SequenceEvent>()
 
-        val parserMap = Parser.parserMap()
-
         var truncated = false
 
         val expanded = mutableSetOf<String>()
 
 
+
         /**
          * Find methods directly called by the specified method.
          *
-         * Important:
+         * Java PSI based implementation.
+         *
+         * Rules:
          * 1. Only inspect actual Java call expressions.
          * 2. Do not enter anonymous or local classes.
          * 3. Do not scan nested method bodies.
-         * 4. Keep lambda calls as part of the current method body.
+         * 4. Keep lambda calls.
          * 5. Only include project Java source methods.
+         * 6. Preserve recursive calls for cycle detection.
+         * 7. Keep Graph parser target compatibility.
          */
         fun directCallees(method: PsiMethod): List<PsiMethod> {
 
@@ -239,87 +242,65 @@ private object CallChainAnalyzer {
 
                 override fun visitElement(element: PsiElement) {
 
-                    // -------------------------------------------------
-                    // Do not enter nested classes.
-                    //
-                    // This prevents methods inside anonymous classes
-                    // and local classes from being attributed to
-                    // the current method.
-                    // -------------------------------------------------
-
+                    // Do not enter anonymous classes or local classes.
                     if (element is PsiClass) {
                         return
                     }
 
-                    // Defensive protection against nested methods.
+                    // Do not enter other method bodies.
                     if (element is PsiMethod && element != method) {
                         return
                     }
 
-                    try {
+                    if (element is PsiCallExpression) {
 
-                        // -------------------------------------------------
-                        // Only process actual Java method/constructor calls.
-                        // Do not scan arbitrary references.
-                        // -------------------------------------------------
-
-                        if (element is PsiCallExpression) {
+                        try {
 
                             val resolved = element.resolveMethod()
 
                             if (resolved != null && resolved.isValid) {
 
-                                if (resolved != method) {
+                                // Keep the original Graph parser compatibility.
+                                // If no parser exists, use the resolved Java method.
+                                val graphTarget =
+                                    Parser.graphTarget(project, resolved)
+                                        ?: resolved
 
-                                    val parser = Parser.findParser(
-                                        resolved,
-                                        parserMap,
+                                val targetMethod =
+                                    graphTarget as? PsiMethod
+                                        ?: resolved
+
+                                if (
+                                    targetMethod.isValid &&
+                                    isProjectJavaMethod(
+                                        project,
+                                        targetMethod,
                                     )
+                                ) {
 
-                                    if (parser != null) {
+                                    val id = methodId(targetMethod)
 
-                                        val graphTarget = parser.graphTarget(
-                                            resolved,
-                                        )
-
-                                        val targetMethod =
-                                            graphTarget as? PsiMethod
-
-                                        if (
-                                            targetMethod != null &&
-                                            targetMethod.isValid &&
-                                            targetMethod != method &&
-                                            targetMethod.containingFile
-                                                ?.language?.id == "JAVA" &&
-                                            isProjectJavaMethod(
-                                                project,
-                                                targetMethod,
-                                            )
-                                        ) {
-
-                                            val id = methodId(targetMethod)
-
-                                            result.putIfAbsent(
-                                                id,
-                                                targetMethod,
-                                            )
-                                        }
-                                    }
+                                    // Keep recursive calls.
+                                    // walk() is responsible for cycle detection.
+                                    result.putIfAbsent(
+                                        id,
+                                        targetMethod,
+                                    )
                                 }
                             }
-                        }
 
-                    } catch (_: RuntimeException) {
-                        // Ignore incomplete PSI references.
+                        } catch (_: RuntimeException) {
+                            // Ignore incomplete PSI references.
+                        }
                     }
 
-                    // Continue traversing normal method-body elements.
                     super.visitElement(element)
                 }
             })
 
             return result.values.toList()
         }
+
 
 
         /**
