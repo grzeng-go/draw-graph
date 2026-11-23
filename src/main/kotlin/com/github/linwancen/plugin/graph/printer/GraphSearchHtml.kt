@@ -18,7 +18,7 @@ object GraphSearchHtml {
         } ?: "null"
         return """
 <style>
-  .dg-search-toolbar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; box-sizing: border-box; display: flex; gap: 6px; align-items: center; padding: 6px; background: #f5f5f5; }
+  .dg-search-toolbar { position: sticky; top: 0; z-index: 10; box-sizing: border-box; display: flex; gap: 6px; align-items: center; padding: 6px; background: #f5f5f5; }
   .dg-search-toolbar input { min-width: 180px; padding: 4px; }
   .dg-search-toolbar button { padding: 4px 8px; }
   .dg-search-match > rect, .dg-search-match > polygon, .dg-search-match > ellipse, .dg-search-match > path { stroke: #ff9800 !important; stroke-width: 3px !important; }
