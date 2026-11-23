@@ -72,8 +72,8 @@ abstract class ParserLang<F : PsiElement> : Parser() {
             }
         }
         val key = classInfo?.get("sign")
-            ?: func?.let { toSign(it) }
             ?: filePath
+            ?: func?.let { toSign(it) }
             ?: element.text
         val name = classInfo?.get("name")
             ?: element.containingFile?.name?.let { it.substringBeforeLast('.', it) }
