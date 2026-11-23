@@ -23,6 +23,8 @@ import org.cef.handler.CefMessageRouterHandlerAdapter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.github.linwancen.plugin.graph.ui.CallChainToolWindowFactory;
+
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
@@ -107,6 +109,7 @@ public class JcefNavigateHandler extends CefMessageRouterHandlerAdapter {
                             return;
                         }
                         GraphWindowFactory.openMethodTab(project, target, true);
+                        CallChainToolWindowFactory.showFor(project, target);
                         callback.success("open graph: " + filePath + "#" + offset);
                         return;
                     }

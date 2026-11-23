@@ -45,6 +45,8 @@
         <!--suppress PluginXmlValidity -->
         <toolWindow id="Graph" secondary="false" icon="/META-INF/pluginIcon.svg" anchor="right"
                     factoryClass="com.github.linwancen.plugin.graph.ui.GraphWindowFactory"/>
+        <toolWindow id="Call Chain" secondary="false" anchor="bottom"
+                    factoryClass="com.github.linwancen.plugin.graph.ui.CallChainToolWindowFactory"/>
     </extensions>
 
     <extensionPoints>
