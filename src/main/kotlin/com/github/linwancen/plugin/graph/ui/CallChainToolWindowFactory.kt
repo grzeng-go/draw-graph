@@ -12,6 +12,7 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiPackage
 import com.intellij.psi.PsiRecursiveElementWalkingVisitor
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.ReferencesSearch
@@ -121,6 +122,10 @@ private object CallChainAnalyzer {
                     try {
                         for (reference in element.references) {
                             val resolved = reference.resolve() ?: continue
+
+                            // 忽略包、模块等非方法级解析结果
+                            if (resolved is PsiPackage) continue
+
                             val parser = Parser.findParser(resolved, parserMap) ?: continue
                             val target = parser.graphTarget(resolved) ?: continue
                             if (target == method || !target.isValid) continue
