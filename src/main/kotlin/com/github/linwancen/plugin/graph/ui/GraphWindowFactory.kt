@@ -72,8 +72,9 @@ class GraphWindowFactory : ToolWindowFactory {
                 val result = ApplicationManager.getApplication().runReadAction(
                     Computable<Pair<Pair<String, String>, Int>?> {
                         val psiFile = PsiManager.getInstance(project).findFile(file) ?: return@Computable null
-                        val element = psiFile.findElementAt(offset) ?: psiFile
-                        Parser.graphClassInfo(project, element) to offset.coerceIn(0, psiFile.textLength)
+                        val validOffset = offset.coerceIn(0, psiFile.textLength.coerceAtLeast(0))
+                        val element = psiFile.findElementAt(validOffset) ?: psiFile
+                        Parser.graphClassInfo(project, element) to validOffset
                     },
                 ) ?: return@invokeLater
                 val (info, validOffset) = result
