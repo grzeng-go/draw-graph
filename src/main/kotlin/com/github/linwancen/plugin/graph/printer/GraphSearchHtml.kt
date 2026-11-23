@@ -18,15 +18,187 @@ object GraphSearchHtml {
         } ?: "null"
         return """
 <style>
-  .dg-search-toolbar { position: sticky; top: 0; z-index: 10; box-sizing: border-box; display: flex; gap: 6px; align-items: center; padding: 6px; background: #f5f5f5; }
-  .dg-search-toolbar input { min-width: 180px; padding: 4px; }
-  .dg-search-toolbar button { padding: 4px 8px; }
-  .dg-search-match > rect, .dg-search-match > polygon, .dg-search-match > ellipse, .dg-search-match > path { stroke: #ff9800 !important; stroke-width: 3px !important; }
-  .dg-search-current > rect, .dg-search-current > polygon, .dg-search-current > ellipse, .dg-search-current > path { stroke: #f44336 !important; stroke-width: 5px !important; }
-  .dg-selected-method { filter: drop-shadow(0 0 6px #1565c0); }
-  .dg-selected-method > rect, .dg-selected-method > polygon, .dg-selected-method > ellipse, .dg-selected-method > path { stroke: #1565c0 !important; stroke-width: 5px !important; }
-  .dg-related-edge path, .dg-related-edge polygon, path.dg-related-edge { stroke: #e53935 !important; stroke-width: 3px !important; }
-  .dg-related-edge text, .dg-related-edge tspan, .dg-related-edge-label, .dg-related-edge-label text, .dg-related-edge-label tspan { fill: #e53935 !important; color: #e53935 !important; stroke: #e53935 !important; font-weight: bold !important; }
+    /* 页面基础布局 */
+    html,
+    body {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        padding-top: 54px;
+    }
+
+    *,
+    *::before,
+    *::after {
+        box-sizing: border-box;
+    }
+
+    /* 顶部固定搜索工具栏 */
+    .dg-search-toolbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10000;
+
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        width: 100%;
+        min-height: 46px;
+        padding: 7px 12px;
+
+        background: rgba(245, 245, 245, 0.94);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+
+        border-bottom: 1px solid #dcdcdc;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    }
+
+    /* 搜索输入框 */
+    .dg-search-toolbar input {
+        flex: 1;
+        min-width: 180px;
+        max-width: 360px;
+        height: 30px;
+
+        padding: 4px 10px;
+
+        font-size: 13px;
+        color: #333;
+
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        outline: none;
+
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .dg-search-toolbar input:focus {
+        border-color: #4285f4;
+        box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.15);
+    }
+
+    .dg-search-toolbar input::placeholder {
+        color: #999;
+    }
+
+    /* 上一个 / 下一个按钮 */
+    .dg-search-toolbar button {
+        flex-shrink: 0;
+        height: 30px;
+
+        padding: 4px 12px;
+
+        font-size: 12px;
+        color: #444;
+
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .dg-search-toolbar button:hover {
+        color: #1677ff;
+        background: #eaf3ff;
+        border-color: #1677ff;
+    }
+
+    .dg-search-toolbar button:active {
+        background: #d6e8ff;
+    }
+
+    .dg-search-toolbar button:focus-visible {
+        outline: 2px solid #1677ff;
+        outline-offset: 2px;
+    }
+
+    /* 搜索结果数量 */
+    #dg-search-count {
+        flex-shrink: 0;
+        min-width: 42px;
+
+        font-size: 12px;
+        color: #666;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    /* 搜索匹配节点 */
+    .dg-search-match > rect,
+    .dg-search-match > polygon,
+    .dg-search-match > ellipse,
+    .dg-search-match > path {
+        stroke: #ff9800 !important;
+        stroke-width: 3px !important;
+    }
+
+    /* 当前选中节点 */
+    .dg-search-current > rect,
+    .dg-search-current > polygon,
+    .dg-search-current > ellipse,
+    .dg-search-current > path {
+        stroke: #f44336 !important;
+        stroke-width: 5px !important;
+    }
+
+    /* 指定方法高亮 */
+    .dg-selected-method {
+        filter: drop-shadow(0 0 6px #1565c0);
+    }
+
+    .dg-selected-method > rect,
+    .dg-selected-method > polygon,
+    .dg-selected-method > ellipse,
+    .dg-selected-method > path {
+        stroke: #1565c0 !important;
+        stroke-width: 5px !important;
+    }
+
+    /* 关联连线高亮 */
+    .dg-related-edge path,
+    .dg-related-edge polygon,
+    path.dg-related-edge {
+        stroke: #e53935 !important;
+        stroke-width: 3px !important;
+    }
+
+    /* 关联连线文字高亮 */
+    .dg-related-edge text,
+    .dg-related-edge tspan,
+    .dg-related-edge-label,
+    .dg-related-edge-label text,
+    .dg-related-edge-label tspan {
+        fill: #e53935 !important;
+        color: #e53935 !important;
+        stroke: #e53935 !important;
+        font-weight: bold !important;
+    }
+
+    /* 小屏幕适配 */
+    @media (max-width: 480px) {
+        .dg-search-toolbar {
+            gap: 5px;
+            padding: 6px 8px;
+        }
+
+        .dg-search-toolbar input {
+            min-width: 80px;
+        }
+
+        .dg-search-toolbar button {
+            padding: 4px 8px;
+        }
+    }
 </style>
 <div class="dg-search-toolbar">
   <input id="dg-search-input" type="search" placeholder="$search" aria-label="$search">

@@ -12,14 +12,19 @@
     <!--suppress PluginXmlValidity -->
     <depends optional="true" config-file="scala.xml">org.intellij.scala</depends>
     <depends optional="true" config-file="xml.xml">com.intellij.modules.xml</depends>
-    <depends optional="true" config-file="js.xml">JavaScript</depends>
+    <depends optional="true">JavaScript</depends>
+    <depends optional="true" config-file="js.xml">com.intellij.modules.javascript</depends>
+    <depends optional="true" config-file="vue.xml">org.jetbrains.plugins.vue</depends>
     <depends optional="true" config-file="php.xml">com.jetbrains.php</depends>
     <depends optional="true" config-file="python.xml">com.intellij.modules.python</depends>
-    <depends optional="true" config-file="go.xml">org.jetbrains.plugins.go</depends>
-    <!-- old version -->
-    <depends optional="true" config-file="rust_old.xml">org.rust.lang</depends>
+    <depends optional="true">org.jetbrains.plugins.go</depends>
+    <depends optional="true">com.intellij.modules.go</depends>
+    <depends optional="true" config-file="go.xml">com.intellij.modules.goland</depends>
+    <depends optional="true">org.rust.lang</depends>
     <!--suppress PluginXmlValidity -->
-    <depends optional="true" config-file="rust.xml">com.jetbrains.rust</depends>
+    <depends optional="true">com.jetbrains.rust</depends>
+    <depends optional="true" config-file="rust.xml">com.intellij.modules.rust</depends>
+    <depends optional="true" config-file="dart.xml">Dart</depends>
     <depends optional="true" config-file="ruby.xml">com.intellij.modules.ruby</depends>
     <!--suppress PluginXmlValidity -->
     <depends optional="true" config-file="c.xml">com.intellij.modules.clion</depends>

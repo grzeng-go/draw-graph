@@ -15,6 +15,10 @@ Method call usage graph and maven dependency graph, click to navigate
 - C/C++/OC, Python, Go, Rust, Ruby
 - JS/TS, PHP, Regexp, JSON, Yaml
 
+Method graphs for a programming language require its corresponding IDE language plugin to be installed and enabled. JavaScript, TypeScript, and React use the JavaScript plugin; Vue single-file components use the Vue and JavaScript plugins; Dart and Flutter use the Dart plugin.
+
+方法调用图依赖对应的 IDE 语言插件，请先安装并启用。JavaScript、TypeScript、React 使用 JavaScript 插件；Vue 单文件组件使用 Vue 和 JavaScript 插件；Dart/Flutter 使用 Dart 插件。
+
 #### English Desc
 
 ##### How to Use

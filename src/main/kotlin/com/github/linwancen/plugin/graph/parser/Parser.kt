@@ -52,34 +52,55 @@ abstract class Parser {
 
     companion object {
         private val log = LoggerFactory.getLogger(this::class.java)
+        private val optionalParserClasses = listOf(
+            "com.github.linwancen.plugin.graph.parser.kotlin.KotlinParser",
+            "com.github.linwancen.plugin.graph.parser.python.PythonParser",
+            "com.github.linwancen.plugin.graph.parser.go.GoParser",
+            "com.github.linwancen.plugin.graph.parser.rust.RustParser",
+            "com.github.linwancen.plugin.graph.parser.js.JsParser",
+            "com.github.linwancen.plugin.graph.parser.js.HtmlParser",
+            "com.github.linwancen.plugin.graph.parser.js.VueParser",
+            "com.github.linwancen.plugin.graph.parser.dart.DartParser",
+        )
 
         fun parserMap(): MutableMap<String, Parser> {
             val epn: ExtensionPointName<Parser> = ExtensionPointName.create("com.github.linwancen.drawgraph.parser")
-            val parserList = epn.extensionList
-            log.info("load graph parser epn {}", parserList)
             val parserMap = mutableMapOf<String, Parser>()
-            parserList.forEach {
-                log.info("load graph parser {} -> {}", it.id(), it)
-                parserMap[it.id()] = it
+            val parserList = try {
+                epn.extensionList
+            } catch (e: LinkageError) {
+                log.info("skip graph parser extensions because a language dependency is unavailable", e)
+                emptyList()
             }
-            // for 2024.2
-            if (parserMap["kotlin"] == null) {
+            parserList.forEach { parser ->
                 try {
-                    Class.forName(
-                        "org.jetbrains.kotlin.psi.KtNamedFunction",
-                        false,
-                        Parser::class.java.classLoader,
-                    )
-                    val kotlin = Class.forName("com.github.linwancen.plugin.graph.parser.kotlin.KotlinParser").kotlin
-                    val parser = kotlin.createInstance() as Parser
-                    parserMap["kotlin"] = parser
-                    log.info("add load graph parser kotlin -> {}", parser)
-                } catch (_: ClassNotFoundException) {
-                    log.info("skip Kotlin graph parser because Kotlin PSI is unavailable")
-                } catch (e: Exception) {
-                    log.info("skip Kotlin graph parser because it could not be initialized", e)
+                    val parserId = parser.id()
+                    log.info("load graph parser {} -> {}", parserId, parser)
+                    parserMap.putIfAbsent(parserId, parser)
                 } catch (e: LinkageError) {
-                    log.info("skip Kotlin graph parser because its dependencies are unavailable", e)
+                    log.info(
+                        "skip graph parser {} because its language dependency is unavailable",
+                        parser.javaClass.name,
+                        e,
+                    )
+                } catch (e: Exception) {
+                    log.info("skip graph parser {} because it could not be initialized", parser.javaClass.name, e)
+                }
+            }
+            optionalParserClasses.forEach { className ->
+                try {
+                    val parserClass = Class.forName(className, false, Parser::class.java.classLoader).kotlin
+                    val parser = parserClass.createInstance() as Parser
+                    val parserId = parser.id()
+                    if (parserMap.putIfAbsent(parserId, parser) == null) {
+                        log.info("add load optional graph parser {} -> {}", parserId, parser)
+                    }
+                } catch (_: ClassNotFoundException) {
+                    log.debug("skip optional graph parser because {} is unavailable", className)
+                } catch (e: Exception) {
+                    log.info("skip optional graph parser {} because it could not be initialized", className, e)
+                } catch (e: LinkageError) {
+                    log.info("skip optional graph parser {} because its dependencies are unavailable", className, e)
                 }
             }
             return parserMap
