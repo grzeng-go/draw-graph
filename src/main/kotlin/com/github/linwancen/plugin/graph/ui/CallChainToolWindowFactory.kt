@@ -1048,12 +1048,14 @@ private class CallChainPanel(
     }
 }
 
+
 /**
- * SequenceDiagram-style canvas.
+ * SequenceDiagram-style canvas with activation bars.
  *
  * Columns = Java classes.
  * Rows = invocation order.
  * Arrows = method calls.
+ * Activation bars = method execution intervals.
  */
 private class CallChainCanvas(
     private val project: Project,
@@ -1068,35 +1070,41 @@ private class CallChainCanvas(
         linkedMapOf<String, Int>()
 
     private val headerHeight = 62
-    private val rowHeight = 68
-    private val columnWidth = 230
+    private val rowHeight = 78
+    private val columnWidth = 270
     private val leftPadding = 35
     private val topPadding = 18
 
+    private val activationWidth = 12
+
     private val headerColor = Color(
-        0xE8,
-        0xF0,
-        0xFA,
+        0xE8, 0xF0, 0xFA
     )
 
     private val lineColor = Color(
-        0xB5,
-        0xBF,
-        0xCC,
+        0xB5, 0xBF, 0xCC
     )
 
     private val callColor = Color(
-        0x3B,
-        0x82,
-        0xD6,
+        0x3B, 0x82, 0xD6
+    )
+
+    private val activationColor = Color(
+        0xD9, 0xE9, 0xFA
+    )
+
+    private val activationBorderColor = Color(
+        0x5B, 0x91, 0xC9
+    )
+
+    private val textColor = Color(
+        0x37, 0x4B, 0x63
     )
 
     init {
 
         background = Color(
-            0xFA,
-            0xFB,
-            0xFD,
+            0xFA, 0xFB, 0xFD
         )
 
         preferredSize = Dimension(
@@ -1166,7 +1174,7 @@ private class CallChainCanvas(
                 topPadding +
                         headerHeight +
                         data.events.size * rowHeight +
-                        80,
+                        100,
             ),
         )
     }
@@ -1179,335 +1187,540 @@ private class CallChainCanvas(
 
         val g2 = g.create() as Graphics2D
 
-        g2.setRenderingHint(
-            RenderingHints.KEY_ANTIALIASING,
-            RenderingHints.VALUE_ANTIALIAS_ON,
-        )
+        try {
 
-        g2.setRenderingHint(
-            RenderingHints.KEY_TEXT_ANTIALIASING,
-            RenderingHints.VALUE_TEXT_ANTIALIAS_ON,
-        )
-
-        eventBounds.clear()
-        participantX.clear()
-
-        if (data.participants.isEmpty()) {
-
-            g2.color = Color.GRAY
-            g2.drawString(
-                "没有找到符合条件的项目 Java 方法调用",
-                30,
-                40,
+            g2.setRenderingHint(
+                RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON,
             )
 
-            g2.dispose()
-            return
-        }
-
-        // -------------------------------------------------
-        // 1. Calculate participant columns.
-        // -------------------------------------------------
-
-        data.participants.forEachIndexed { index, participant ->
-
-            val x = leftPadding +
-                    index * columnWidth +
-                    columnWidth / 2
-
-            participantX[participant.id] = x
-        }
-
-        // -------------------------------------------------
-        // 2. Draw class headers.
-        // -------------------------------------------------
-
-        val headerY = topPadding
-
-        for (participant in data.participants) {
-
-            val centerX = participantX[participant.id]
-                ?: continue
-
-            val width = 184
-            val height = 42
-
-            val x = centerX - width / 2
-
-            g2.color = headerColor
-
-            g2.fillRoundRect(
-                x,
-                headerY,
-                width,
-                height,
-                10,
-                10,
+            g2.setRenderingHint(
+                RenderingHints.KEY_TEXT_ANTIALIASING,
+                RenderingHints.VALUE_TEXT_ANTIALIAS_ON,
             )
 
-            g2.color = Color(
-                0x8B,
-                0xA5,
-                0xC4,
-            )
+            eventBounds.clear()
+            participantX.clear()
 
-            g2.stroke = BasicStroke(1f)
+            if (data.participants.isEmpty()) {
 
-            g2.drawRoundRect(
-                x,
-                headerY,
-                width,
-                height,
-                10,
-                10,
-            )
-
-            g2.color = Color(
-                0x25,
-                0x35,
-                0x4A,
-            )
-
-            g2.font = font.deriveFont(
-                Font.BOLD,
-                12f,
-            )
-
-            val metrics: FontMetrics =
-                g2.fontMetrics
-
-            val text = participant.simpleName
-
-            val displayName = if (
-                metrics.stringWidth(text) > width - 14
-            ) {
-                text.take(20) + "…"
-            } else {
-                text
-            }
-
-            g2.drawString(
-                displayName,
-                centerX -
-                        metrics.stringWidth(displayName) / 2,
-                headerY + 26,
-            )
-        }
-
-        // -------------------------------------------------
-        // 3. Draw lifelines.
-        // -------------------------------------------------
-
-        val lineStart = headerY + headerHeight - 12
-
-        val lineEnd = max(
-            height,
-            lineStart +
-                    data.events.size * rowHeight +
-                    30,
-        )
-
-        g2.color = lineColor
-
-        g2.stroke = BasicStroke(
-            1f,
-            BasicStroke.CAP_BUTT,
-            BasicStroke.JOIN_ROUND,
-            10f,
-            floatArrayOf(5f, 5f),
-            0f,
-        )
-
-        for (participant in data.participants) {
-
-            val x = participantX[participant.id]
-                ?: continue
-
-            g2.drawLine(
-                x,
-                lineStart,
-                x,
-                lineEnd,
-            )
-        }
-
-        // -------------------------------------------------
-        // 4. Draw invocation arrows in source order.
-        // -------------------------------------------------
-
-        for (event in data.events) {
-
-            val callerX = participantX[event.callerId]
-                ?: continue
-
-            val calleeX = participantX[event.calleeId]
-                ?: continue
-
-            val y = lineStart +
-                    (event.index + 1) * rowHeight
-
-            g2.color = if (event.cycle) {
-                Color(0xD9, 0x77, 0x06)
-            } else {
-                callColor
-            }
-
-            g2.stroke = BasicStroke(
-                1.5f,
-                BasicStroke.CAP_ROUND,
-                BasicStroke.JOIN_ROUND,
-            )
-
-            if (event.selfCall) {
-
-                drawSelfCall(
-                    g2,
-                    callerX,
-                    y,
-                    event.cycle,
-                )
-
-                val label = event.calleeMethod
-
-                g2.color = Color(
-                    0x37,
-                    0x4B,
-                    0x63,
-                )
-
-                g2.font = font.deriveFont(
-                    11f,
-                )
+                g2.color = Color.GRAY
 
                 g2.drawString(
-                    label,
-                    callerX + 20,
-                    y - 10,
+                    "没有找到符合条件的项目 Java 方法调用",
+                    30,
+                    40,
                 )
 
-                eventBounds[event.index] =
-                    java.awt.Rectangle(
-                        callerX - 4,
-                        y - 27,
-                        190,
-                        48,
-                    )
+                return
+            }
 
-            } else {
+            // -------------------------------------------------
+            // 1. Calculate participant columns.
+            // -------------------------------------------------
 
-                val startX = callerX
-                val endX = calleeX
+            data.participants.forEachIndexed {
+                    index,
+                    participant ->
 
-                val direction = if (
-                    endX > startX
-                ) {
-                    1
-                } else {
-                    -1
-                }
+                val x = leftPadding +
+                        index * columnWidth +
+                        columnWidth / 2
 
-                val arrowStart = startX +
-                        direction * 5
+                participantX[participant.id] = x
+            }
 
-                val arrowEnd = endX -
-                        direction * 5
+            // -------------------------------------------------
+            // 2. Draw class headers.
+            // -------------------------------------------------
 
-                g2.drawLine(
-                    arrowStart,
-                    y,
-                    arrowEnd,
-                    y,
+            val headerY = topPadding
+
+            for (participant in data.participants) {
+
+                val centerX = participantX[participant.id]
+                    ?: continue
+
+                val width = 210
+                val height = 42
+
+                val x = centerX - width / 2
+
+                g2.color = headerColor
+
+                g2.fillRoundRect(
+                    x,
+                    headerY,
+                    width,
+                    height,
+                    10,
+                    10,
                 )
-
-                drawArrowHead(
-                    g2,
-                    arrowEnd,
-                    y,
-                    direction,
-                )
-
-                // Method name above the arrow.
-                val label = event.calleeMethod
 
                 g2.color = Color(
-                    0x37,
-                    0x4B,
-                    0x63,
+                    0x8B, 0xA5, 0xC4
+                )
+
+                g2.stroke = BasicStroke(1f)
+
+                g2.drawRoundRect(
+                    x,
+                    headerY,
+                    width,
+                    height,
+                    10,
+                    10,
+                )
+
+                g2.color = Color(
+                    0x25, 0x35, 0x4A
                 )
 
                 g2.font = font.deriveFont(
                     Font.BOLD,
-                    11f,
+                    12f,
                 )
 
                 val metrics = g2.fontMetrics
 
-                val labelWidth = metrics.stringWidth(label)
+                val text = participant.simpleName
 
-                val labelX = (
-                        startX + endX
-                        ) / 2 - labelWidth / 2
+                val displayName = if (
+                    metrics.stringWidth(text) > width - 14
+                ) {
+                    text.take(22) + "…"
+                } else {
+                    text
+                }
 
                 g2.drawString(
-                    label,
-                    labelX,
-                    y - 8,
+                    displayName,
+                    centerX -
+                            metrics.stringWidth(displayName) / 2,
+                    headerY + 26,
                 )
-
-                // Clickable area around the invocation.
-                eventBounds[event.index] =
-                    java.awt.Rectangle(
-                        minOf(startX, endX),
-                        y - 24,
-                        kotlin.math.abs(endX - startX),
-                        42,
-                    )
             }
 
-            // Depth marker.
-            g2.color = Color(
-                0x8B,
-                0x95,
-                0xA5,
+            // -------------------------------------------------
+            // 3. Draw lifelines.
+            // -------------------------------------------------
+
+            val lineStart = headerY + headerHeight - 12
+
+            val lineEnd = max(
+                height,
+                lineStart +
+                        data.events.size * rowHeight +
+                        30,
             )
 
-            g2.font = font.deriveFont(9f)
+            g2.color = lineColor
 
-            g2.drawString(
-                "L${event.depth}",
-                8,
-                y + 4,
+            g2.stroke = BasicStroke(
+                1f,
+                BasicStroke.CAP_BUTT,
+                BasicStroke.JOIN_ROUND,
+                10f,
+                floatArrayOf(5f, 5f),
+                0f,
             )
+
+            for (participant in data.participants) {
+
+                val x = participantX[participant.id]
+                    ?: continue
+
+                g2.drawLine(
+                    x,
+                    lineStart,
+                    x,
+                    lineEnd,
+                )
+            }
+
+            // -------------------------------------------------
+            // 4. Draw root activation bar.
+            //
+            // The selected method is the root execution context.
+            // -------------------------------------------------
+
+            val root = data.participants.firstOrNull()
+
+            if (root != null) {
+
+                val rootX = participantX[root.id]
+
+                if (rootX != null) {
+
+                    drawActivationBar(
+                        g = g2,
+                        x = rootX,
+                        startY = lineStart,
+                        endY = lineEnd,
+                        depth = 0,
+                        root = true,
+                    )
+                }
+            }
+
+            // -------------------------------------------------
+            // 5. Draw nested activation bars.
+            //
+            // A method's activation ends when the next event
+            // at the same or a shallower depth is encountered.
+            // -------------------------------------------------
+
+            for (event in data.events) {
+
+                val calleeX = participantX[event.calleeId]
+                    ?: continue
+
+                val startY = lineStart +
+                        (event.index + 1) * rowHeight
+
+                val endIndex = findActivationEnd(
+                    events = data.events,
+                    currentIndex = event.index,
+                    currentDepth = event.depth,
+                )
+
+                val endY = lineStart +
+                        (endIndex + 1) * rowHeight -
+                        8
+
+                drawActivationBar(
+                    g = g2,
+                    x = calleeX,
+                    startY = startY - 7,
+                    endY = max(
+                        startY + 18,
+                        endY,
+                    ),
+                    depth = event.depth,
+                    root = false,
+                )
+            }
+
+            // -------------------------------------------------
+            // 6. Draw invocation arrows.
+            // -------------------------------------------------
+
+            for (event in data.events) {
+
+                val callerX = participantX[event.callerId]
+                    ?: continue
+
+                val calleeX = participantX[event.calleeId]
+                    ?: continue
+
+                val y = lineStart +
+                        (event.index + 1) * rowHeight
+
+                val arrowColor = if (event.cycle) {
+                    Color(0xD9, 0x77, 0x06)
+                } else {
+                    callColor
+                }
+
+                g2.color = arrowColor
+
+                g2.stroke = BasicStroke(
+                    1.6f,
+                    BasicStroke.CAP_ROUND,
+                    BasicStroke.JOIN_ROUND,
+                )
+
+                if (event.selfCall) {
+
+                    // -----------------------------------------
+                    // Same-class method invocation.
+                    // -----------------------------------------
+
+                    drawSelfCall(
+                        g2,
+                        callerX,
+                        y,
+                    )
+
+                    val label =
+                        "${event.callerMethod}() → ${event.calleeMethod}()"
+
+                    drawCallLabel(
+                        g = g2,
+                        text = label,
+                        x = callerX + 55,
+                        y = y - 9,
+                        bold = false,
+                    )
+
+                    eventBounds[event.index] =
+                        java.awt.Rectangle(
+                            callerX - 4,
+                            y - 28,
+                            245,
+                            65,
+                        )
+
+                } else {
+
+                    // -----------------------------------------
+                    // Cross-class method invocation.
+                    // -----------------------------------------
+
+                    val direction = if (
+                        calleeX > callerX
+                    ) {
+                        1
+                    } else {
+                        -1
+                    }
+
+                    val arrowStart = callerX +
+                            direction * (activationWidth / 2 + 2)
+
+                    val arrowEnd = calleeX -
+                            direction * (activationWidth / 2 + 2)
+
+                    g2.drawLine(
+                        arrowStart,
+                        y,
+                        arrowEnd,
+                        y,
+                    )
+
+                    drawArrowHead(
+                        g2,
+                        arrowEnd,
+                        y,
+                        direction,
+                    )
+
+                    // Display caller and callee.
+                    val label =
+                        "${event.callerMethod}() → ${event.calleeMethod}()"
+
+                    val labelWidth = g2.getFontMetrics(
+                        g2.font.deriveFont(
+                            Font.BOLD,
+                            11f,
+                        )
+                    ).stringWidth(label)
+
+                    val labelX =
+                        (callerX + calleeX) / 2 -
+                                labelWidth / 2
+
+                    drawCallLabel(
+                        g = g2,
+                        text = label,
+                        x = labelX,
+                        y = y - 9,
+                        bold = true,
+                    )
+
+                    eventBounds[event.index] =
+                        java.awt.Rectangle(
+                            minOf(callerX, calleeX),
+                            y - 26,
+                            kotlin.math.abs(calleeX - callerX),
+                            48,
+                        )
+                }
+
+                // ---------------------------------------------
+                // Depth marker.
+                // ---------------------------------------------
+
+                g2.color = Color(
+                    0x8B, 0x95, 0xA5
+                )
+
+                g2.font = font.deriveFont(9f)
+
+                g2.drawString(
+                    "L${event.depth}",
+                    8,
+                    y + 4,
+                )
+            }
+
+            // -------------------------------------------------
+            // 7. Empty state.
+            // -------------------------------------------------
+
+            if (data.events.isEmpty()) {
+
+                g2.color = Color.GRAY
+
+                g2.drawString(
+                    "当前方法没有找到符合条件的调用",
+                    30,
+                    lineEnd + 25,
+                )
+            }
+
+            // -------------------------------------------------
+            // 8. Legend.
+            // -------------------------------------------------
+
+            drawLegend(g2)
+
+        } finally {
+            g2.dispose()
         }
-
-        // -------------------------------------------------
-        // 5. Draw root method label.
-        // -------------------------------------------------
-
-        val first = data.events.firstOrNull()
-
-        if (first == null) {
-
-            g2.color = Color.GRAY
-
-            g2.drawString(
-                "当前方法没有找到符合过滤条件的调用",
-                30,
-                lineEnd + 25,
-            )
-        }
-
-        g2.dispose()
     }
 
     /**
-     * Draw a self-call loop.
+     * Find the ending row of a method activation.
+     *
+     * When the next event has the same or a smaller depth,
+     * the current method has finished its nested invocation.
+     */
+    private fun findActivationEnd(
+        events: List<SequenceEvent>,
+        currentIndex: Int,
+        currentDepth: Int,
+    ): Int {
+
+        for (index in currentIndex + 1 until events.size) {
+
+            if (events[index].depth <= currentDepth) {
+                return index
+            }
+        }
+
+        return events.size
+    }
+
+    /**
+     * Draw method activation bar.
+     *
+     * Nested calls use a small horizontal offset to make
+     * execution nesting easier to distinguish.
+     */
+    private fun drawActivationBar(
+        g: Graphics2D,
+        x: Int,
+        startY: Int,
+        endY: Int,
+        depth: Int,
+        root: Boolean,
+    ) {
+
+        val safeEndY = max(
+            startY + 18,
+            endY,
+        )
+
+        val offset = if (root) {
+            0
+        } else {
+            (depth.coerceAtMost(5) % 3) * 5
+        }
+
+        val barX = x -
+                activationWidth / 2 +
+                offset
+
+        val barWidth = if (root) {
+            activationWidth
+        } else {
+            activationWidth
+        }
+
+        val barHeight = safeEndY - startY
+
+        if (barHeight <= 0) {
+            return
+        }
+
+        val oldColor = g.color
+        val oldStroke = g.stroke
+
+        g.color = activationColor
+
+        g.fillRoundRect(
+            barX,
+            startY,
+            barWidth,
+            barHeight,
+            4,
+            4,
+        )
+
+        g.color = activationBorderColor
+
+        g.stroke = BasicStroke(1f)
+
+        g.drawRoundRect(
+            barX,
+            startY,
+            barWidth,
+            barHeight,
+            4,
+            4,
+        )
+
+        g.color = oldColor
+        g.stroke = oldStroke
+    }
+
+    /**
+     * Draw a method call label with a light background.
+     */
+    private fun drawCallLabel(
+        g: Graphics2D,
+        text: String,
+        x: Int,
+        y: Int,
+        bold: Boolean,
+    ) {
+
+        val oldColor = g.color
+        val oldFont = g.font
+
+        g.font = font.deriveFont(
+            if (bold) Font.BOLD else Font.PLAIN,
+            11f,
+        )
+
+        val metrics = g.fontMetrics
+
+        val width = metrics.stringWidth(text)
+        val height = metrics.height
+
+        g.color = Color(
+            0xFA, 0xFB, 0xFD
+        )
+
+        g.fillRoundRect(
+            x - 4,
+            y - height + 3,
+            width + 8,
+            height + 3,
+            5,
+            5,
+        )
+
+        g.color = textColor
+
+        g.drawString(
+            text,
+            x,
+            y,
+        )
+
+        g.color = oldColor
+        g.font = oldFont
+    }
+
+    /**
+     * Draw a same-class method call.
      */
     private fun drawSelfCall(
         g: Graphics2D,
         x: Int,
         y: Int,
-        cycle: Boolean,
     ) {
 
         val loopWidth = 48
@@ -1537,34 +1750,16 @@ private class CallChainCanvas(
 
         g.draw(path)
 
-        // Arrow points back to the same lifeline.
-        val arrow = Path2D.Float()
-
-        arrow.moveTo(
-            x.toFloat(),
-            (y + loopHeight).toFloat(),
+        drawArrowHead(
+            g,
+            x,
+            y + loopHeight,
+            -1,
         )
-
-        arrow.lineTo(
-            (x + 7).toFloat(),
-            (y + loopHeight - 5).toFloat(),
-        )
-
-        arrow.moveTo(
-            x.toFloat(),
-            (y + loopHeight).toFloat(),
-        )
-
-        arrow.lineTo(
-            (x + 7).toFloat(),
-            (y + loopHeight + 5).toFloat(),
-        )
-
-        g.draw(arrow)
     }
 
     /**
-     * Draw an arrow head.
+     * Draw arrow head.
      */
     private fun drawArrowHead(
         g: Graphics2D,
@@ -1573,28 +1768,69 @@ private class CallChainCanvas(
         direction: Int,
     ) {
 
-        val arrow = Path2D.Float()
+        val arrow = Path2D.Double()
 
         arrow.moveTo(
-            x.toFloat(),
-            y.toFloat(),
+            x.toDouble(),
+            y.toDouble(),
         )
 
         arrow.lineTo(
-            (x - direction * 8).toFloat(),
-            (y - 4).toFloat(),
+            (x - direction * 8).toDouble(),
+            (y - 4).toDouble(),
         )
 
         arrow.moveTo(
-            x.toFloat(),
-            y.toFloat(),
+            x.toDouble(),
+            y.toDouble(),
         )
 
         arrow.lineTo(
-            (x - direction * 8).toFloat(),
-            (y + 4).toFloat(),
+            (x - direction * 8).toDouble(),
+            (y + 4).toDouble(),
         )
 
         g.draw(arrow)
+    }
+
+    /**
+     * Draw legend.
+     */
+    private fun drawLegend(g: Graphics2D) {
+
+        val x = 20
+        val y = 15
+
+        g.color = activationColor
+
+        g.fillRoundRect(
+            x,
+            y,
+            12,
+            18,
+            3,
+            3,
+        )
+
+        g.color = activationBorderColor
+
+        g.drawRoundRect(
+            x,
+            y,
+            12,
+            18,
+            3,
+            3,
+        )
+
+        g.color = textColor
+
+        g.font = font.deriveFont(10f)
+
+        g.drawString(
+            "方法执行区间",
+            x + 18,
+            y + 13,
+        )
     }
 }
