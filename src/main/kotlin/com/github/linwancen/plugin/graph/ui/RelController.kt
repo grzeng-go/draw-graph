@@ -68,18 +68,11 @@ object RelController {
             if (!fromAction && !window.toolWindow.isVisible) {
                 return
             }
-            // for before 201.6668.113
-            if (files.size == 1 && !files[0].isDirectory) {
-                ApplicationManager.getApplication().executeOnPooledThread {
-                    buildSrc(project, window, files, null)
+            object : Task.Backgroundable(project, "draw parse", true) {
+                override fun run(indicator: ProgressIndicator) {
+                    buildSrc(project, window, files, indicator)
                 }
-            } else {
-                object : Task.Backgroundable(project, "draw parse") {
-                    override fun run(indicator: ProgressIndicator) {
-                        buildSrc(project, window, files, indicator)
-                    }
-                }.queue()
-            }
+            }.queue()
         } catch (e: Throwable) {
             LOG.info("RelController.forFile() catch Throwable but log to record.", e)
         }

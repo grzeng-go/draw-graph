@@ -52,9 +52,13 @@ class GraphWindowFactory : ToolWindowFactory {
                 ) ?: return@invokeLater
                 val (targetElement, info, source) = resolved
                 val (file, offset) = source
+                val existing = host.findClassTab(info.first)
                 val target = host.openClassTab(info.first, info.second, file, offset)
                 host.toolWindow.activate(null)
-                RelController.forClass(project, target, targetElement)
+                // 只有目标类对应的 Tab 不存在时，才需要首次生成调用关系图
+                if (existing == null) {
+                    RelController.forClass(project, target, targetElement)
+                }
             }
         }
 
