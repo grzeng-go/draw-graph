@@ -2,11 +2,14 @@
 package com.github.linwancen.plugin.graph.ui
 
 import com.github.linwancen.plugin.graph.parser.Parser
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
@@ -24,12 +27,14 @@ import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.FontMetrics
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.geom.Path2D
+import java.util.WeakHashMap
 import javax.swing.BorderFactory
 import javax.swing.JButton
 import javax.swing.JCheckBox
@@ -43,11 +48,10 @@ import javax.swing.SwingUtilities
 import kotlin.math.max
 
 /**
- * Bottom IDEA tool window.
+ * Call Chain tool window.
  *
+ * Only analyzes Java methods.
  * The existing Graph tool window is not modified.
- *
- * Current call-chain analysis supports Java methods only.
  */
 class CallChainToolWindowFactory : ToolWindowFactory {
 
@@ -66,21 +70,23 @@ class CallChainToolWindowFactory : ToolWindowFactory {
     }
 
     companion object {
-        private val panels = java.util.WeakHashMap<Project, CallChainPanel>()
 
-        /**
-         * Called by the existing Graph node-click action.
-         *
-         * Activates the bottom Call Chain panel without replacing Graph.
-         */
+        private val panels =
+            WeakHashMap<Project, CallChainPanel>()
+
         @JvmStatic
-        fun showFor(project: Project, element: PsiElement) {
+        fun showFor(
+            project: Project,
+            element: PsiElement,
+        ) {
             ApplicationManager.getApplication().invokeLater {
+
                 if (project.isDisposed || !element.isValid) {
                     return@invokeLater
                 }
 
-                val toolWindow = ToolWindowManager.getInstance(project)
+                val toolWindow = ToolWindowManager
+                    .getInstance(project)
                     .getToolWindow("Call Chain")
                     ?: return@invokeLater
 
@@ -93,107 +99,121 @@ class CallChainToolWindowFactory : ToolWindowFactory {
 }
 
 /**
- * Call-chain filter options.
+ * Call Chain options.
  */
 private data class CallChainOptions(
-    /** Only display project methods. */
-    val projectOnly: Boolean = false,
-
-    /** Ignore trivial getter/setter methods. */
+    val projectOnly: Boolean = true,
     val skipAccessors: Boolean = true,
-
-    /** Ignore constructors. */
     val skipConstructors: Boolean = true,
-
-    /** Ignore private methods. */
     val skipPrivateMethods: Boolean = false,
-
-    /** Ignore framework, logging and common utility methods. */
     val skipFrameworkCalls: Boolean = true,
-
-    /** Maximum call depth. */
-    val maxDepth: Int = 12,
-
-    /** Excluded package names and fully qualified class names. */
+    val maxDepth: Int = 5,
     val excludedPatterns: List<String> = emptyList(),
 )
 
-private data class ChainNode(
+/**
+ * A class shown as one sequence-diagram column.
+ */
+private data class SequenceParticipant(
     val id: String,
-    val label: String,
-    val detail: String,
+    val className: String,
+    val simpleName: String,
+)
+
+/**
+ * One method invocation event.
+ *
+ * The event represents:
+ *
+ * callerClass.callerMethod()
+ *     -> calleeClass.calleeMethod()
+ */
+private data class SequenceEvent(
+    val index: Int,
+    val callerId: String,
+    val callerClass: String,
+    val callerMethod: String,
+    val calleeId: String,
+    val calleeClass: String,
+    val calleeMethod: String,
     val fileUrl: String?,
     val offset: Int,
-    val external: Boolean,
     val depth: Int,
-    val root: Boolean = false,
+    val selfCall: Boolean,
+    val cycle: Boolean,
 )
 
-private data class ChainEdge(
-    val from: String,
-    val to: String,
-    val cycle: Boolean = false,
-)
-
+/**
+ * Sequence diagram snapshot.
+ */
 private data class ChainSnapshot(
-    val rootId: String,
-    val nodes: List<ChainNode>,
-    val edges: List<ChainEdge>,
+    val participants: List<SequenceParticipant>,
+    val events: List<SequenceEvent>,
     val truncated: Boolean,
 )
 
 private object CallChainAnalyzer {
 
-    private const val MAX_NODES = 500
+    private const val MAX_EVENTS = 500
 
-    /**
-     * Analyze the selected Java method's forward call chain.
-     *
-     * Returns null when the selected element is not a Java method.
-     */
+    private val frameworkPackages = listOf(
+        "java.",
+        "javax.",
+        "jakarta.",
+        "kotlin.",
+        "kotlinx.",
+        "org.springframework.",
+        "org.apache.",
+        "org.slf4j.",
+        "ch.qos.logback.",
+        "com.fasterxml.",
+        "com.google.",
+        "org.hibernate.",
+        "org.mybatis.",
+        "cn.hutool.",
+    )
+
     fun analyze(
         project: Project,
         selected: PsiElement,
         options: CallChainOptions,
     ): ChainSnapshot? {
 
-        // Resolve the selected element to its graph target first.
-        val target = Parser.graphTarget(project, selected) ?: selected
+        val target = Parser.graphTarget(project, selected)
+            ?: selected
 
-        // This feature currently supports Java methods only.
-        val root = target as? PsiMethod ?: return null
+        val root = target as? PsiMethod
+            ?: return null
 
-        /**
-         * Check whether a PSI method belongs to a Java file.
-         */
-        fun isJavaMethod(method: PsiMethod): Boolean {
-            return method.containingFile?.language?.id == "JAVA"
-        }
-
-        if (!isJavaMethod(root)) {
+        if (!isProjectJavaMethod(project, root)) {
             return null
         }
 
-        val rootNode = node(project, root, 0, true)
+        val rootClass = participant(root)
+            ?: return null
 
-        val nodes = linkedMapOf<String, ChainNode>()
-        nodes[rootNode.id] = rootNode
+        val participants =
+            linkedMapOf<String, SequenceParticipant>()
 
-        val edges = linkedMapOf<Pair<String, String>, ChainEdge>()
+        participants[rootClass.id] = rootClass
 
-        var truncated = false
+        val events = mutableListOf<SequenceEvent>()
 
         val parserMap = Parser.parserMap()
 
+        var truncated = false
+
+        val expanded = mutableSetOf<String>()
+
         /**
-         * Find methods called inside the current Java method body.
+         * Find project Java methods called by this method.
          *
-         * Only local source files are traversed.
-         * Compiled PSI from JARs is never walked.
+         * Dependency methods are discarded here.
+         * Compiled PSI is never recursively traversed.
          */
         fun directCallees(method: PsiMethod): List<PsiMethod> {
 
-            if (!isJavaMethod(method)) {
+            if (!isProjectJavaMethod(project, method)) {
                 return emptyList()
             }
 
@@ -230,31 +250,45 @@ private object CallChainAnalyzer {
                             val graphTarget = parser.graphTarget(resolved)
                                 ?: continue
 
-                            val targetMethod = graphTarget as? PsiMethod
-                                ?: continue
+                            val targetMethod =
+                                graphTarget as? PsiMethod
+                                    ?: continue
 
-                            if (!isJavaMethod(targetMethod)) {
+                            if (!targetMethod.isValid) {
                                 continue
                             }
 
-                            if (targetMethod == method || !targetMethod.isValid) {
+                            if (targetMethod == method) {
                                 continue
                             }
 
-                            val targetNode = node(
-                                project,
-                                targetMethod,
-                                0,
-                                false,
-                            )
+                            // Java only.
+                            if (
+                                targetMethod.containingFile
+                                    ?.language?.id != "JAVA"
+                            ) {
+                                continue
+                            }
+
+                            // Only project source methods.
+                            if (
+                                !isProjectJavaMethod(
+                                    project,
+                                    targetMethod,
+                                )
+                            ) {
+                                continue
+                            }
+
+                            val id = methodId(targetMethod)
 
                             result.putIfAbsent(
-                                targetNode.id,
+                                id,
                                 targetMethod,
                             )
                         }
                     } catch (_: RuntimeException) {
-                        // Broken or incomplete PSI should not abort analysis.
+                        // Ignore incomplete PSI references.
                     }
 
                     super.visitElement(element)
@@ -265,113 +299,11 @@ private object CallChainAnalyzer {
         }
 
         /**
-         * Add a visible node.
-         */
-        fun addNode(
-            method: PsiMethod,
-            depth: Int,
-            isRoot: Boolean = false,
-        ): ChainNode {
-
-            val candidate = node(
-                project,
-                method,
-                depth,
-                isRoot,
-            )
-
-            val existing = nodes[candidate.id]
-
-            if (existing != null) {
-                return existing
-            }
-
-            nodes[candidate.id] = candidate
-
-            return candidate
-        }
-
-        /**
-         * Check whether the method belongs to a framework or utility library.
+         * Decide whether a method should be visible.
          *
-         * Matching is based on the containing class package.
-         * Method names alone are never used for filtering.
+         * A hidden method is still recursively analyzed.
          */
-        fun isFrameworkOrUtilityMethod(method: PsiMethod): Boolean {
-
-            val qualifiedName = method.containingClass?.qualifiedName
-                ?: return false
-
-            val excludedPackages = listOf(
-                "java.",
-                "javax.",
-                "jakarta.",
-                "kotlin.",
-                "kotlinx.",
-                "org.springframework.",
-                "org.apache.",
-                "org.slf4j.",
-                "ch.qos.logback.",
-                "com.fasterxml.",
-                "com.google.",
-                "org.hibernate.",
-                "org.mybatis.",
-                "cn.hutool.",
-            )
-
-            return excludedPackages.any {
-                qualifiedName.startsWith(it)
-            }
-        }
-
-        /**
-         * Check whether the method belongs to a user-excluded package or class.
-         *
-         * Examples:
-         * com.example.common
-         * com.example.service.UserService
-         * com.example.util.*
-         */
-        fun isExcludedClassOrPackage(
-            method: PsiMethod,
-            patterns: List<String>,
-        ): Boolean {
-
-            if (patterns.isEmpty()) {
-                return false
-            }
-
-            val qualifiedName = method.containingClass?.qualifiedName
-                ?: return false
-
-            return patterns.any { rawPattern ->
-
-                val pattern = rawPattern
-                    .trim()
-                    .removeSuffix(".*")
-                    .trimEnd('.')
-
-                if (pattern.isEmpty()) {
-                    false
-                } else {
-                    qualifiedName == pattern ||
-                            qualifiedName.startsWith("$pattern.") ||
-                            qualifiedName.startsWith("$pattern$")
-                }
-            }
-        }
-
-        /**
-         * Decide whether a method should be displayed.
-         *
-         * Important:
-         * This only controls visibility.
-         * Hidden project methods are still traversed.
-         */
-        fun shouldDisplay(
-            method: PsiMethod,
-            candidate: ChainNode,
-        ): Boolean {
+        fun shouldDisplay(method: PsiMethod): Boolean {
 
             if (
                 isExcludedClassOrPackage(
@@ -379,10 +311,6 @@ private object CallChainAnalyzer {
                     options.excludedPatterns,
                 )
             ) {
-                return false
-            }
-
-            if (options.projectOnly && candidate.external) {
                 return false
             }
 
@@ -409,7 +337,7 @@ private object CallChainAnalyzer {
 
             if (
                 options.skipFrameworkCalls &&
-                isFrameworkOrUtilityMethod(method)
+                isFrameworkMethod(method)
             ) {
                 return false
             }
@@ -417,178 +345,244 @@ private object CallChainAnalyzer {
             return true
         }
 
-        // Methods already expanded in the forward direction.
-        val expandedForward = mutableSetOf(rootNode.id)
-
         /**
-         * Forward call-chain traversal.
+         * Recursive forward traversal.
          *
-         * visibleParentId:
-         * The nearest visible parent node.
-         *
-         * Hidden project methods are not displayed, but their descendants
-         * are still analyzed.
+         * callerClass/callerMethod identify the nearest visible
+         * invocation context.
          */
-        fun walkForward(
+        fun walk(
             method: PsiMethod,
-            visibleParentId: String,
+            callerClass: SequenceParticipant,
+            callerMethod: String,
             depth: Int,
             path: Set<String>,
         ) {
 
             if (depth >= options.maxDepth) {
-                truncated = true
+                if (directCallees(method).isNotEmpty()) {
+                    truncated = true
+                }
                 return
             }
 
-            for (callee in directCallees(method)) {
+            val currentId = methodId(method)
+
+            // Avoid expanding the same method repeatedly.
+            if (!expanded.add(currentId)) {
+                return
+            }
+
+            val callees = directCallees(method)
+
+            for (callee in callees) {
+
+                if (events.size >= MAX_EVENTS) {
+                    truncated = true
+                    return
+                }
 
                 if (!callee.isValid) {
                     continue
                 }
 
-                val candidate = node(
-                    project,
-                    callee,
-                    depth + 1,
-                    false,
-                )
+                val calleeId = methodId(callee)
 
-                val cycle = candidate.id in path
+                val calleeClass = participant(callee)
+                    ?: continue
 
-                // Handle cycles.
-                if (cycle) {
+                val calleeMethod =
+                    callee.name ?: "<anonymous>"
 
-                    if (shouldDisplay(callee, candidate)) {
+                val cycle = calleeId in path
 
-                        if (
-                            candidate.id !in nodes &&
-                            nodes.size >= MAX_NODES
-                        ) {
-                            truncated = true
-                            return
-                        }
+                val visible = shouldDisplay(callee)
 
-                        val targetNode = addNode(
-                            callee,
-                            depth + 1,
-                        )
+                if (visible) {
 
-                        edges.putIfAbsent(
-                            visibleParentId to targetNode.id,
-                            ChainEdge(
-                                from = visibleParentId,
-                                to = targetNode.id,
-                                cycle = true,
-                            ),
-                        )
-                    }
-
-                    continue
-                }
-
-                val visible = shouldDisplay(
-                    callee,
-                    candidate,
-                )
-
-                // Hidden method.
-                if (!visible) {
-
-                    // External library methods are leaves.
-                    if (candidate.external) {
-                        continue
-                    }
-
-                    // Avoid repeated expansion of hidden methods.
-                    if (candidate.id in expandedForward) {
-                        continue
-                    }
-
-                    expandedForward.add(candidate.id)
-
-                    // Do not add the hidden node to the canvas.
-                    // Continue traversal to find visible descendants.
-                    walkForward(
-                        method = callee,
-                        visibleParentId = visibleParentId,
-                        depth = depth + 1,
-                        path = path + candidate.id,
+                    participants.putIfAbsent(
+                        calleeClass.id,
+                        calleeClass,
                     )
 
-                    continue
+                    val nav = callee.navigationElement
+
+                    val file = nav.containingFile?.virtualFile
+                        ?: callee.containingFile?.virtualFile
+
+                    events.add(
+                        SequenceEvent(
+                            index = events.size,
+                            callerId = callerClass.id,
+                            callerClass = callerClass.simpleName,
+                            callerMethod = callerMethod,
+                            calleeId = calleeClass.id,
+                            calleeClass = calleeClass.simpleName,
+                            calleeMethod = calleeMethod,
+                            fileUrl = file?.url,
+                            offset = nav.textOffset.coerceAtLeast(0),
+                            depth = depth + 1,
+                            selfCall = callerClass.id == calleeClass.id,
+                            cycle = cycle,
+                        )
+                    )
+
+                    if (cycle) {
+                        continue
+                    }
+
+                    walk(
+                        method = callee,
+                        callerClass = calleeClass,
+                        callerMethod = calleeMethod,
+                        depth = depth + 1,
+                        path = path + calleeId,
+                    )
+
+                } else {
+
+                    // Hidden project method:
+                    // continue traversing without adding a column or event.
+                    if (cycle) {
+                        continue
+                    }
+
+                    walk(
+                        method = callee,
+                        callerClass = callerClass,
+                        callerMethod = callerMethod,
+                        depth = depth + 1,
+                        path = path + calleeId,
+                    )
                 }
-
-                // Respect the node limit.
-                if (
-                    candidate.id !in nodes &&
-                    nodes.size >= MAX_NODES
-                ) {
-                    truncated = true
-                    return
-                }
-
-                val targetNode = addNode(
-                    callee,
-                    depth + 1,
-                )
-
-                // Connect the nearest visible parent and child.
-                edges.putIfAbsent(
-                    visibleParentId to targetNode.id,
-                    ChainEdge(
-                        from = visibleParentId,
-                        to = targetNode.id,
-                    ),
-                )
-
-                // External dependencies remain leaf nodes.
-                if (targetNode.external) {
-                    continue
-                }
-
-                if (targetNode.id in expandedForward) {
-                    continue
-                }
-
-                expandedForward.add(targetNode.id)
-
-                walkForward(
-                    method = callee,
-                    visibleParentId = targetNode.id,
-                    depth = depth + 1,
-                    path = path + targetNode.id,
-                )
             }
         }
 
-        // Start from the selected Java method.
-        walkForward(
+        walk(
             method = root,
-            visibleParentId = rootNode.id,
+            callerClass = rootClass,
+            callerMethod = root.name ?: "<root>",
             depth = 0,
-            path = setOf(rootNode.id),
+            path = setOf(methodId(root)),
         )
 
         return ChainSnapshot(
-            rootId = rootNode.id,
-            nodes = nodes.values.toList(),
-            edges = edges.values.toList(),
+            participants = participants.values.toList(),
+            events = events.toList(),
             truncated = truncated,
         )
     }
 
     /**
-     * Returns true only for trivial JavaBean accessors.
+     * Only methods in project Java source roots are allowed.
      *
-     * Name alone is not enough:
-     * getUserInfo() and isOrderValid() remain visible
-     * when they contain real logic.
+     * This excludes JDK, Maven/Gradle dependencies and external libraries.
      */
-    private fun isTrivialAccessor(element: PsiElement): Boolean {
+    private fun isProjectJavaMethod(
+        project: Project,
+        method: PsiMethod,
+    ): Boolean {
 
-        val name = (element as? PsiNamedElement)?.name
+        if (
+            method.containingFile?.language?.id != "JAVA"
+        ) {
+            return false
+        }
+
+        val file = method.containingFile?.virtualFile
             ?: return false
+
+        if (file.fileSystem !is LocalFileSystem) {
+            return false
+        }
+
+        return ProjectFileIndex
+            .getInstance(project)
+            .isInContent(file)
+    }
+
+    private fun methodId(method: PsiMethod): String {
+
+        val nav = method.navigationElement
+
+        val file = nav.containingFile?.virtualFile
+            ?: method.containingFile?.virtualFile
+
+        return "${file?.url ?: "unknown"}#${nav.textOffset}"
+    }
+
+    private fun participant(
+        method: PsiMethod,
+    ): SequenceParticipant? {
+
+        val containingClass = method.containingClass
+            ?: return null
+
+        val qualifiedName = containingClass.qualifiedName
+            ?: return null
+
+        val simpleName = containingClass.name
+            ?: qualifiedName.substringAfterLast('.')
+
+        return SequenceParticipant(
+            id = qualifiedName,
+            className = qualifiedName,
+            simpleName = simpleName,
+        )
+    }
+
+    /**
+     * Package and class exclusion.
+     *
+     * com.example.common
+     * com.example.service.UserService
+     * com.example.util.*
+     */
+    private fun isExcludedClassOrPackage(
+        method: PsiMethod,
+        patterns: List<String>,
+    ): Boolean {
+
+        val qualifiedName = method.containingClass
+            ?.qualifiedName
+            ?: return false
+
+        return patterns.any { raw ->
+
+            val pattern = raw
+                .trim()
+                .removeSuffix(".*")
+                .trimEnd('.')
+
+            pattern.isNotEmpty() && (
+                    qualifiedName == pattern ||
+                            qualifiedName.startsWith("$pattern.") ||
+                            qualifiedName.startsWith("$pattern$")
+                    )
+        }
+    }
+
+    private fun isFrameworkMethod(
+        method: PsiMethod,
+    ): Boolean {
+
+        val qualifiedName = method.containingClass
+            ?.qualifiedName
+            ?: return false
+
+        return frameworkPackages.any {
+            qualifiedName.startsWith(it)
+        }
+    }
+
+    /**
+     * Only hide trivial JavaBean accessors.
+     */
+    private fun isTrivialAccessor(
+        method: PsiMethod,
+    ): Boolean {
+
+        val name = method.name
 
         val kind = when {
             name.matches(Regex("^get[A-Z_].*")) -> "get"
@@ -597,130 +591,55 @@ private object CallChainAnalyzer {
             else -> return false
         }
 
-        var body = element.text ?: return false
+        val body = method.body ?: return false
 
-        body = body
-            .replace(Regex("(?s)/\\*.*?\\*/"), "")
-            .replace(Regex("(?m)//.*$"), "")
-            .replace(Regex("\\s+"), "")
-            .replace(";", "")
+        val statements = body.statements
 
-        val open = body.indexOf('{')
-        val close = body.lastIndexOf('}')
-
-        if (open >= 0 && close > open) {
-            body = body.substring(open + 1, close)
-        } else {
-            val equals = body.indexOf('=')
-            if (equals >= 0) {
-                body = body.substring(equals + 1)
-            }
+        if (statements.size != 1) {
+            return false
         }
+
+        val statement = statements[0].text
+            .replace(Regex("\\s+"), "")
+            .removeSuffix(";")
 
         return when (kind) {
 
             "get", "is" ->
                 Regex(
-                    "^(?:return)?(?:this\\.)?[A-Za-z_$][A-Za-z0-9_$]*$"
-                ).matches(body)
+                    "^return(?:this\\.)?[A-Za-z_$][A-Za-z0-9_$]*$"
+                ).matches(statement)
 
             "set" ->
                 Regex(
                     "^(?:this\\.)?[A-Za-z_$][A-Za-z0-9_$]*=(?:this\\.)?[A-Za-z_$][A-Za-z0-9_$]*$"
-                ).matches(body)
+                ).matches(statement)
 
             else -> false
         }
     }
-
-    private fun node(
-        project: Project,
-        element: PsiElement,
-        depth: Int,
-        root: Boolean,
-    ): ChainNode {
-
-        val nav = element.navigationElement
-
-        val file = nav.containingFile?.virtualFile
-            ?: element.containingFile?.virtualFile
-
-        val offset = nav.textOffset.coerceAtLeast(0)
-        val url = file?.url
-
-        val id = (url ?: "psi:${element.language.id}") + "#" + offset
-
-        val path = file?.path?.replace('\\', '/')
-
-        val base = project.basePath
-            ?.replace('\\', '/')
-            ?.trimEnd('/')
-
-        val external = path == null ||
-                base == null ||
-                !(
-                        path.equals(base, ignoreCase = true) ||
-                                path.startsWith("$base/", ignoreCase = true)
-                        )
-
-        val name = (element as? PsiNamedElement)?.name
-            ?: element.text.lineSequence()
-                .firstOrNull()
-                ?.trim()
-                ?.take(100)
-            ?: element.javaClass.simpleName
-
-        val fileName = file?.name ?: "External symbol"
-
-        val line = try {
-            val text = element.containingFile.text
-
-            1 + text
-                .take(element.textOffset.coerceAtMost(text.length))
-                .count { it == '\n' }
-
-        } catch (_: RuntimeException) {
-            0
-        }
-
-        return ChainNode(
-            id = id,
-            label = name.ifBlank {
-                element.javaClass.simpleName
-            },
-            detail = if (line > 0) {
-                "$fileName : $line"
-            } else {
-                fileName
-            },
-            fileUrl = url,
-            offset = offset,
-            external = external,
-            depth = depth,
-            root = root,
-        )
-    }
 }
 
 /**
- * Call-chain tool window panel.
+ * Call Chain panel.
  */
 private class CallChainPanel(
     private val project: Project,
 ) : JPanel(BorderLayout()) {
 
     private val status = JLabel(
-        "点击 Graph 中的 Java 方法节点，查看正向调用链"
+        "点击 Graph 中的 Java 方法节点，查看正向调用时序图"
     )
 
     private val canvas = CallChainCanvas(project)
 
     private var lastElement: PsiElement? = null
 
-    // Basic filters.
+    private var analysisSequence = 0
+
     private val projectOnly = JCheckBox(
         "仅项目代码",
-        false,
+        true,
     )
 
     private val skipAccessors = JCheckBox(
@@ -739,19 +658,43 @@ private class CallChainPanel(
     )
 
     private val skipFrameworkCalls = JCheckBox(
-        "过滤框架/日志/工具调用",
+        "过滤框架调用",
         true,
     )
 
-    // Maximum call depth: 1-30, default 12.
     private val maxDepthSpinner = JSpinner(
-        SpinnerNumberModel(12, 1, 30, 1)
+        SpinnerNumberModel(5, 1, 30, 1)
     )
 
-    // Multiple package/class exclusion rules.
-    private val excludedPatternsField = JTextField(35)
+    private val excludedPatternsField = JTextField(32)
+
+    private companion object {
+
+        const val KEY_PROJECT_ONLY =
+            "draw.graph.callchain.projectOnly"
+
+        const val KEY_SKIP_ACCESSORS =
+            "draw.graph.callchain.skipAccessors"
+
+        const val KEY_SKIP_CONSTRUCTORS =
+            "draw.graph.callchain.skipConstructors"
+
+        const val KEY_SKIP_PRIVATE =
+            "draw.graph.callchain.skipPrivate"
+
+        const val KEY_SKIP_FRAMEWORK =
+            "draw.graph.callchain.skipFramework"
+
+        const val KEY_MAX_DEPTH =
+            "draw.graph.callchain.maxDepth"
+
+        const val KEY_EXCLUDED_PATTERNS =
+            "draw.graph.callchain.excludedPatterns"
+    }
 
     init {
+
+        loadSettings()
 
         val northPanel = JPanel()
 
@@ -760,7 +703,7 @@ private class CallChainPanel(
             javax.swing.BoxLayout.Y_AXIS,
         )
 
-        // First row: status and refresh.
+        // Toolbar.
         val toolbar = JPanel(
             BorderLayout(8, 0)
         )
@@ -777,22 +720,20 @@ private class CallChainPanel(
             BorderLayout.CENTER,
         )
 
-        val refresh = JButton("刷新")
+        val refreshButton = JButton("刷新")
 
-        refresh.addActionListener {
-            lastElement?.let {
-                analyze(it)
-            }
+        refreshButton.addActionListener {
+            lastElement?.let { analyze(it) }
         }
 
         toolbar.add(
-            refresh,
+            refreshButton,
             BorderLayout.EAST,
         )
 
         northPanel.add(toolbar)
 
-        // Second row: basic filters.
+        // Basic filters.
         val filterPanel = JPanel(
             FlowLayout(
                 FlowLayout.LEFT,
@@ -805,20 +746,17 @@ private class CallChainPanel(
             "调用链过滤"
         )
 
-        val checkboxes = listOf(
+        listOf(
             projectOnly,
             skipAccessors,
             skipConstructors,
             skipPrivateMethods,
             skipFrameworkCalls,
-        )
-
-        checkboxes.forEach { checkbox ->
+        ).forEach { checkbox ->
 
             checkbox.addActionListener {
-                lastElement?.let {
-                    analyze(it)
-                }
+                saveSettings()
+                lastElement?.let { analyze(it) }
             }
 
             filterPanel.add(checkbox)
@@ -826,7 +764,7 @@ private class CallChainPanel(
 
         northPanel.add(filterPanel)
 
-        // Third row: advanced options.
+        // Advanced options.
         val advancedPanel = JPanel(
             FlowLayout(
                 FlowLayout.LEFT,
@@ -839,7 +777,6 @@ private class CallChainPanel(
             "高级设置"
         )
 
-        // Maximum call depth.
         advancedPanel.add(
             JLabel("最大调用层数：")
         )
@@ -849,42 +786,37 @@ private class CallChainPanel(
             26,
         )
 
-        advancedPanel.add(maxDepthSpinner)
-
         maxDepthSpinner.addChangeListener {
-            lastElement?.let {
-                analyze(it)
-            }
+            saveSettings()
+            lastElement?.let { analyze(it) }
         }
 
-        // Excluded packages/classes.
+        advancedPanel.add(maxDepthSpinner)
+
         advancedPanel.add(
             JLabel("排除包/类：")
         )
-
-        excludedPatternsField.toolTipText =
-            "多个规则使用逗号、分号或空格分隔。例如：com.example.common,com.example.service.UserService"
 
         excludedPatternsField.preferredSize = Dimension(
             300,
             26,
         )
 
-        advancedPanel.add(excludedPatternsField)
+        excludedPatternsField.toolTipText =
+            "多个规则使用逗号、分号或空格分隔，例如 com.example.common,com.example.service.UserService"
 
-        // Press Enter to apply.
         excludedPatternsField.addActionListener {
-            lastElement?.let {
-                analyze(it)
-            }
+            saveSettings()
+            lastElement?.let { analyze(it) }
         }
+
+        advancedPanel.add(excludedPatternsField)
 
         val applyButton = JButton("应用")
 
         applyButton.addActionListener {
-            lastElement?.let {
-                analyze(it)
-            }
+            saveSettings()
+            lastElement?.let { analyze(it) }
         }
 
         advancedPanel.add(applyButton)
@@ -903,12 +835,107 @@ private class CallChainPanel(
     }
 
     /**
-     * Read current UI options.
-     * Called on EDT before background analysis starts.
+     * Load project-specific settings.
      */
+    private fun loadSettings() {
+
+        val properties = PropertiesComponent
+            .getInstance(project)
+
+        projectOnly.isSelected =
+            properties.getBoolean(
+                KEY_PROJECT_ONLY,
+                true,
+            )
+
+        skipAccessors.isSelected =
+            properties.getBoolean(
+                KEY_SKIP_ACCESSORS,
+                true,
+            )
+
+        skipConstructors.isSelected =
+            properties.getBoolean(
+                KEY_SKIP_CONSTRUCTORS,
+                true,
+            )
+
+        skipPrivateMethods.isSelected =
+            properties.getBoolean(
+                KEY_SKIP_PRIVATE,
+                false,
+            )
+
+        skipFrameworkCalls.isSelected =
+            properties.getBoolean(
+                KEY_SKIP_FRAMEWORK,
+                true,
+            )
+
+        maxDepthSpinner.value =
+            properties.getInt(
+                KEY_MAX_DEPTH,
+                5,
+            ).coerceIn(1, 30)
+
+        excludedPatternsField.text =
+            properties.getValue(
+                KEY_EXCLUDED_PATTERNS,
+                "",
+            )
+    }
+
+    /**
+     * Save project-specific settings.
+     */
+    private fun saveSettings() {
+
+        if (project.isDisposed) {
+            return
+        }
+
+        val properties = PropertiesComponent
+            .getInstance(project)
+
+        properties.setValue(
+            KEY_PROJECT_ONLY,
+            projectOnly.isSelected,
+        )
+
+        properties.setValue(
+            KEY_SKIP_ACCESSORS,
+            skipAccessors.isSelected,
+        )
+
+        properties.setValue(
+            KEY_SKIP_CONSTRUCTORS,
+            skipConstructors.isSelected,
+        )
+
+        properties.setValue(
+            KEY_SKIP_PRIVATE,
+            skipPrivateMethods.isSelected,
+        )
+
+        properties.setValue(
+            KEY_SKIP_FRAMEWORK,
+            skipFrameworkCalls.isSelected,
+        )
+
+        properties.setValue(
+            KEY_MAX_DEPTH,
+            (maxDepthSpinner.value as Number).toInt(),
+        )
+
+        properties.setValue(
+            KEY_EXCLUDED_PATTERNS,
+            excludedPatternsField.text.trim(),
+        )
+    }
+
     private fun currentOptions(): CallChainOptions {
 
-        val excludedPatterns = excludedPatternsField.text
+        val patterns = excludedPatternsField.text
             .split(Regex("[,;\\s]+"))
             .map { it.trim() }
             .filter { it.isNotEmpty() }
@@ -921,7 +948,7 @@ private class CallChainPanel(
             skipPrivateMethods = skipPrivateMethods.isSelected,
             skipFrameworkCalls = skipFrameworkCalls.isSelected,
             maxDepth = (maxDepthSpinner.value as Number).toInt(),
-            excludedPatterns = excludedPatterns,
+            excludedPatterns = patterns,
         )
     }
 
@@ -933,9 +960,13 @@ private class CallChainPanel(
 
         lastElement = element
 
+        saveSettings()
+
         val options = currentOptions()
 
-        status.text = "正在分析 Java 正向调用链…"
+        val sequence = ++analysisSequence
+
+        status.text = "正在分析 Java 正向调用时序图…"
 
         ApplicationManager.getApplication()
             .executeOnPooledThread {
@@ -960,7 +991,10 @@ private class CallChainPanel(
 
                     SwingUtilities.invokeLater {
 
-                        if (project.isDisposed) {
+                        if (
+                            project.isDisposed ||
+                            sequence != analysisSequence
+                        ) {
                             return@invokeLater
                         }
 
@@ -968,30 +1002,29 @@ private class CallChainPanel(
 
                             canvas.setSnapshot(
                                 ChainSnapshot(
-                                    rootId = "",
-                                    nodes = emptyList(),
-                                    edges = emptyList(),
+                                    participants = emptyList(),
+                                    events = emptyList(),
                                     truncated = false,
                                 )
                             )
 
                             status.text =
-                                "当前调用链功能暂时仅支持 Java 方法"
+                                "当前功能仅支持项目内 Java 方法"
 
                         } else {
 
                             canvas.setSnapshot(snapshot)
 
                             val suffix = if (snapshot.truncated) {
-                                "（已达到分析上限）"
+                                " · 已达到分析上限"
                             } else {
                                 ""
                             }
 
                             status.text =
-                                "节点 ${snapshot.nodes.size} · " +
-                                        "连线 ${snapshot.edges.size} · " +
-                                        "Java 正向调用链$suffix"
+                                "类 ${snapshot.participants.size} · " +
+                                        "调用 ${snapshot.events.size}" +
+                                        suffix
                         }
                     }
 
@@ -999,12 +1032,15 @@ private class CallChainPanel(
 
                     SwingUtilities.invokeLater {
 
-                        if (project.isDisposed) {
+                        if (
+                            project.isDisposed ||
+                            sequence != analysisSequence
+                        ) {
                             return@invokeLater
                         }
 
                         status.text =
-                            "调用链分析失败：" +
+                            "分析失败：" +
                                     (e.message ?: e.javaClass.simpleName)
                     }
                 }
@@ -1013,9 +1049,11 @@ private class CallChainPanel(
 }
 
 /**
- * Call-chain canvas.
+ * SequenceDiagram-style canvas.
  *
- * Keeps the original node rendering and source navigation behavior.
+ * Columns = Java classes.
+ * Rows = invocation order.
+ * Arrows = method calls.
  */
 private class CallChainCanvas(
     private val project: Project,
@@ -1023,10 +1061,35 @@ private class CallChainCanvas(
 
     private var snapshot: ChainSnapshot? = null
 
-    private val boxes = linkedMapOf<
-            String,
-            java.awt.Rectangle
-            >()
+    private val eventBounds =
+        linkedMapOf<Int, java.awt.Rectangle>()
+
+    private val participantX =
+        linkedMapOf<String, Int>()
+
+    private val headerHeight = 62
+    private val rowHeight = 68
+    private val columnWidth = 230
+    private val leftPadding = 35
+    private val topPadding = 18
+
+    private val headerColor = Color(
+        0xE8,
+        0xF0,
+        0xFA,
+    )
+
+    private val lineColor = Color(
+        0xB5,
+        0xBF,
+        0xCC,
+    )
+
+    private val callColor = Color(
+        0x3B,
+        0x82,
+        0xD6,
+    )
 
     init {
 
@@ -1037,7 +1100,7 @@ private class CallChainCanvas(
         )
 
         preferredSize = Dimension(
-            1000,
+            1100,
             600,
         )
 
@@ -1045,24 +1108,30 @@ private class CallChainCanvas(
 
             override fun mouseClicked(e: MouseEvent) {
 
-                val hit = boxes.entries.firstOrNull {
-                    it.value.contains(e.point)
-                } ?: return
+                val hit = eventBounds.entries
+                    .firstOrNull {
+                        it.value.contains(e.point)
+                    } ?: return
 
-                val node = snapshot?.nodes?.firstOrNull {
-                    it.id == hit.key
-                } ?: return
+                val event = snapshot
+                    ?.events
+                    ?.firstOrNull {
+                        it.index == hit.key
+                    } ?: return
 
-                val url = node.fileUrl ?: return
+                val url = event.fileUrl ?: return
 
-                val file = VirtualFileManager.getInstance()
+                val file = VirtualFileManager
+                    .getInstance()
                     .findFileByUrl(url)
                     ?: return
 
                 OpenFileDescriptor(
                     project,
                     file,
-                    node.offset.coerceAtMost(file.length.toInt()),
+                    event.offset.coerceAtMost(
+                        file.length.toInt()
+                    ),
                 ).navigate(true)
             }
         })
@@ -1078,32 +1147,26 @@ private class CallChainCanvas(
 
     override fun getPreferredSize(): Dimension {
 
-        val nodes = snapshot?.nodes.orEmpty()
+        val data = snapshot
+            ?: return Dimension(1100, 600)
 
-        if (nodes.isEmpty()) {
-            return Dimension(1000, 600)
-        }
-
-        // Compatible with older Kotlin collection APIs.
-        val minDepth = nodes.map { it.depth }.min() ?: 0
-        val maxDepth = nodes.map { it.depth }.max() ?: 0
-
-        val layers = nodes.groupBy {
-            it.depth
-        }
-
-        val maxRows = layers.values
-            .map { it.size }
-            .max() ?: 1
+        val columnCount = max(
+            1,
+            data.participants.size,
+        )
 
         return Dimension(
             max(
-                1000,
-                (maxDepth - minDepth + 1) * 250 + 100,
+                1100,
+                leftPadding * 2 +
+                        columnCount * columnWidth,
             ),
             max(
                 600,
-                maxRows * 100 + 100,
+                topPadding +
+                        headerHeight +
+                        data.events.size * rowHeight +
+                        80,
             ),
         )
     }
@@ -1121,195 +1184,88 @@ private class CallChainCanvas(
             RenderingHints.VALUE_ANTIALIAS_ON,
         )
 
-        boxes.clear()
+        g2.setRenderingHint(
+            RenderingHints.KEY_TEXT_ANTIALIASING,
+            RenderingHints.VALUE_TEXT_ANTIALIAS_ON,
+        )
 
-        if (data.nodes.isEmpty()) {
+        eventBounds.clear()
+        participantX.clear()
+
+        if (data.participants.isEmpty()) {
+
+            g2.color = Color.GRAY
+            g2.drawString(
+                "没有找到符合条件的项目 Java 方法调用",
+                30,
+                40,
+            )
+
             g2.dispose()
             return
         }
 
-        val minDepth = data.nodes
-            .map { it.depth }
-            .min() ?: 0
+        // -------------------------------------------------
+        // 1. Calculate participant columns.
+        // -------------------------------------------------
 
-        val layers = data.nodes
-            .groupBy { it.depth }
-            .toSortedMap()
+        data.participants.forEachIndexed { index, participant ->
 
-        val positions = linkedMapOf<
-                String,
-                java.awt.Rectangle
-                >()
+            val x = leftPadding +
+                    index * columnWidth +
+                    columnWidth / 2
 
-        // Calculate node positions.
-        for ((depth, layer) in layers) {
-
-            val x = 35 + (depth - minDepth) * 250
-
-            layer.sortedBy {
-                it.label
-            }.forEachIndexed { index, node ->
-
-                val y = 35 + index * 100
-
-                val rect = java.awt.Rectangle(
-                    x,
-                    y,
-                    205,
-                    62,
-                )
-
-                positions[node.id] = rect
-                boxes[node.id] = rect
-            }
+            participantX[participant.id] = x
         }
 
-        // Draw edges.
-        for (edge in data.edges) {
+        // -------------------------------------------------
+        // 2. Draw class headers.
+        // -------------------------------------------------
 
-            val from = positions[edge.from] ?: continue
-            val to = positions[edge.to] ?: continue
+        val headerY = topPadding
 
-            val x1 = from.x + from.width
-            val y1 = from.y + from.height / 2
+        for (participant in data.participants) {
 
-            val x2 = to.x
-            val y2 = to.y + to.height / 2
+            val centerX = participantX[participant.id]
+                ?: continue
 
-            g2.color = if (edge.cycle) {
-                Color(0xD9, 0x77, 0x06)
-            } else {
-                Color(0x91, 0x9B, 0xAA)
-            }
+            val width = 184
+            val height = 42
 
-            g2.stroke = if (edge.cycle) {
+            val x = centerX - width / 2
 
-                BasicStroke(
-                    1.5f,
-                    BasicStroke.CAP_ROUND,
-                    BasicStroke.JOIN_ROUND,
-                    10f,
-                    floatArrayOf(5f, 4f),
-                    0f,
-                )
-
-            } else {
-                BasicStroke(1.3f)
-            }
-
-            val curve = Path2D.Float()
-
-            curve.moveTo(
-                x1.toFloat(),
-                y1.toFloat(),
-            )
-
-            val middle = (x1 + x2) / 2f
-
-            curve.curveTo(
-                middle,
-                y1.toFloat(),
-                middle,
-                y2.toFloat(),
-                x2.toFloat(),
-                y2.toFloat(),
-            )
-
-            g2.draw(curve)
-
-            // Arrow.
-            val arrow = Path2D.Float()
-
-            arrow.moveTo(
-                x2.toFloat(),
-                y2.toFloat(),
-            )
-
-            arrow.lineTo(
-                (x2 - 8).toFloat(),
-                (y2 - 4).toFloat(),
-            )
-
-            arrow.lineTo(
-                (x2 - 8).toFloat(),
-                (y2 + 4).toFloat(),
-            )
-
-            arrow.closePath()
-
-            g2.fill(arrow)
-        }
-
-        // Draw nodes.
-        for (node in data.nodes) {
-
-            val rect = positions[node.id] ?: continue
-
-            g2.color = when {
-
-                node.root -> Color(
-                    0xD9,
-                    0xF5,
-                    0xE3,
-                )
-
-                node.external -> Color(
-                    0xFF,
-                    0xF1,
-                    0xD6,
-                )
-
-                else -> Color.WHITE
-            }
+            g2.color = headerColor
 
             g2.fillRoundRect(
-                rect.x,
-                rect.y,
-                rect.width,
-                rect.height,
-                12,
-                12,
+                x,
+                headerY,
+                width,
+                height,
+                10,
+                10,
             )
 
-            g2.color = when {
-
-                node.root -> Color(
-                    0x16,
-                    0xA3,
-                    0x4A,
-                )
-
-                node.external -> Color(
-                    0xD9,
-                    0x77,
-                    0x06,
-                )
-
-                else -> Color(
-                    0xA8,
-                    0xB0,
-                    0xBC,
-                )
-            }
-
-            g2.stroke = BasicStroke(
-                if (node.root) 2f else 1f
+            g2.color = Color(
+                0x8B,
+                0xA5,
+                0xC4,
             )
+
+            g2.stroke = BasicStroke(1f)
 
             g2.drawRoundRect(
-                rect.x,
-                rect.y,
-                rect.width,
-                rect.height,
-                12,
-                12,
+                x,
+                headerY,
+                width,
+                height,
+                10,
+                10,
             )
 
-            // Method name.
             g2.color = Color(
-                0x20,
-                0x28,
-                0x33,
+                0x25,
+                0x35,
+                0x4A,
             )
 
             g2.font = font.deriveFont(
@@ -1317,34 +1273,328 @@ private class CallChainCanvas(
                 12f,
             )
 
-            g2.drawString(
-                node.label.take(27),
-                rect.x + 10,
-                rect.y + 24,
-            )
+            val metrics: FontMetrics =
+                g2.fontMetrics
 
-            // Method location.
-            g2.color = Color(
-                0x70,
-                0x78,
-                0x86,
-            )
+            val text = participant.simpleName
 
-            g2.font = font.deriveFont(10f)
-
-            val marker = when {
-                node.root -> "当前方法"
-                node.external -> "依赖库 · 停止递归"
-                else -> node.detail
+            val displayName = if (
+                metrics.stringWidth(text) > width - 14
+            ) {
+                text.take(20) + "…"
+            } else {
+                text
             }
 
             g2.drawString(
-                marker.take(31),
-                rect.x + 10,
-                rect.y + 44,
+                displayName,
+                centerX -
+                        metrics.stringWidth(displayName) / 2,
+                headerY + 26,
+            )
+        }
+
+        // -------------------------------------------------
+        // 3. Draw lifelines.
+        // -------------------------------------------------
+
+        val lineStart = headerY + headerHeight - 12
+
+        val lineEnd = max(
+            height,
+            lineStart +
+                    data.events.size * rowHeight +
+                    30,
+        )
+
+        g2.color = lineColor
+
+        g2.stroke = BasicStroke(
+            1f,
+            BasicStroke.CAP_BUTT,
+            BasicStroke.JOIN_ROUND,
+            10f,
+            floatArrayOf(5f, 5f),
+            0f,
+        )
+
+        for (participant in data.participants) {
+
+            val x = participantX[participant.id]
+                ?: continue
+
+            g2.drawLine(
+                x,
+                lineStart,
+                x,
+                lineEnd,
+            )
+        }
+
+        // -------------------------------------------------
+        // 4. Draw invocation arrows in source order.
+        // -------------------------------------------------
+
+        for (event in data.events) {
+
+            val callerX = participantX[event.callerId]
+                ?: continue
+
+            val calleeX = participantX[event.calleeId]
+                ?: continue
+
+            val y = lineStart +
+                    (event.index + 1) * rowHeight
+
+            g2.color = if (event.cycle) {
+                Color(0xD9, 0x77, 0x06)
+            } else {
+                callColor
+            }
+
+            g2.stroke = BasicStroke(
+                1.5f,
+                BasicStroke.CAP_ROUND,
+                BasicStroke.JOIN_ROUND,
+            )
+
+            if (event.selfCall) {
+
+                drawSelfCall(
+                    g2,
+                    callerX,
+                    y,
+                    event.cycle,
+                )
+
+                val label = event.calleeMethod
+
+                g2.color = Color(
+                    0x37,
+                    0x4B,
+                    0x63,
+                )
+
+                g2.font = font.deriveFont(
+                    11f,
+                )
+
+                g2.drawString(
+                    label,
+                    callerX + 20,
+                    y - 10,
+                )
+
+                eventBounds[event.index] =
+                    java.awt.Rectangle(
+                        callerX - 4,
+                        y - 27,
+                        190,
+                        48,
+                    )
+
+            } else {
+
+                val startX = callerX
+                val endX = calleeX
+
+                val direction = if (
+                    endX > startX
+                ) {
+                    1
+                } else {
+                    -1
+                }
+
+                val arrowStart = startX +
+                        direction * 5
+
+                val arrowEnd = endX -
+                        direction * 5
+
+                g2.drawLine(
+                    arrowStart,
+                    y,
+                    arrowEnd,
+                    y,
+                )
+
+                drawArrowHead(
+                    g2,
+                    arrowEnd,
+                    y,
+                    direction,
+                )
+
+                // Method name above the arrow.
+                val label = event.calleeMethod
+
+                g2.color = Color(
+                    0x37,
+                    0x4B,
+                    0x63,
+                )
+
+                g2.font = font.deriveFont(
+                    11f,
+                    Font.BOLD,
+                )
+
+                val metrics = g2.fontMetrics
+
+                val labelWidth = metrics.stringWidth(label)
+
+                val labelX = (
+                        startX + endX
+                        ) / 2 - labelWidth / 2
+
+                g2.drawString(
+                    label,
+                    labelX,
+                    y - 8,
+                )
+
+                // Clickable area around the invocation.
+                eventBounds[event.index] =
+                    java.awt.Rectangle(
+                        minOf(startX, endX),
+                        y - 24,
+                        kotlin.math.abs(endX - startX),
+                        42,
+                    )
+            }
+
+            // Depth marker.
+            g2.color = Color(
+                0x8B,
+                0x95,
+                0xA5,
+            )
+
+            g2.font = font.deriveFont(9f)
+
+            g2.drawString(
+                "L${event.depth}",
+                8,
+                y + 4,
+            )
+        }
+
+        // -------------------------------------------------
+        // 5. Draw root method label.
+        // -------------------------------------------------
+
+        val first = data.events.firstOrNull()
+
+        if (first == null) {
+
+            g2.color = Color.GRAY
+
+            g2.drawString(
+                "当前方法没有找到符合过滤条件的调用",
+                30,
+                lineEnd + 25,
             )
         }
 
         g2.dispose()
+    }
+
+    /**
+     * Draw a self-call loop.
+     */
+    private fun drawSelfCall(
+        g: Graphics2D,
+        x: Int,
+        y: Int,
+        cycle: Boolean,
+    ) {
+
+        val loopWidth = 48
+        val loopHeight = 30
+
+        val path = Path2D.Float()
+
+        path.moveTo(
+            x.toFloat(),
+            y,
+        )
+
+        path.lineTo(
+            (x + loopWidth).toFloat(),
+            y,
+        )
+
+        path.lineTo(
+            (x + loopWidth).toFloat(),
+            (y + loopHeight).toFloat(),
+        )
+
+        path.lineTo(
+            x.toFloat(),
+            (y + loopHeight).toFloat(),
+        )
+
+        g.draw(path)
+
+        // Arrow points back to the same lifeline.
+        val arrow = Path2D.Float()
+
+        arrow.moveTo(
+            x.toFloat(),
+            (y + loopHeight).toFloat(),
+        )
+
+        arrow.lineTo(
+            (x + 7).toFloat(),
+            (y + loopHeight - 5).toFloat(),
+        )
+
+        arrow.moveTo(
+            x.toFloat(),
+            (y + loopHeight).toFloat(),
+        )
+
+        arrow.lineTo(
+            (x + 7).toFloat(),
+            (y + loopHeight + 5).toFloat(),
+        )
+
+        g.draw(arrow)
+    }
+
+    /**
+     * Draw an arrow head.
+     */
+    private fun drawArrowHead(
+        g: Graphics2D,
+        x: Int,
+        y: Int,
+        direction: Int,
+    ) {
+
+        val arrow = Path2D.Float()
+
+        arrow.moveTo(
+            x.toFloat(),
+            y.toFloat(),
+        )
+
+        arrow.lineTo(
+            (x - direction * 8).toFloat(),
+            (y - 4).toFloat(),
+        )
+
+        arrow.moveTo(
+            x.toFloat(),
+            y.toFloat(),
+        )
+
+        arrow.lineTo(
+            (x - direction * 8).toFloat(),
+            (y + 4).toFloat(),
+        )
+
+        g.draw(arrow)
     }
 }
