@@ -15,6 +15,9 @@ class DrawGraphProjectState : PersistentStateComponent<DrawGraphProjectState?>, 
 
     var autoLoad = true
 
+    /** Show the Call Chain tool window after selecting a method in Graph. */
+    var showCallChain = false
+
     override fun getState(): DrawGraphProjectState {
         return this
     }

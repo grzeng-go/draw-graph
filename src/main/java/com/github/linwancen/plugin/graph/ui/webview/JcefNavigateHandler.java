@@ -2,6 +2,7 @@ package com.github.linwancen.plugin.graph.ui.webview;
 
 import com.github.linwancen.plugin.common.psi.PsiUnSaveUtils;
 import com.github.linwancen.plugin.graph.parser.Parser;
+import com.github.linwancen.plugin.graph.settings.DrawGraphProjectState;
 import com.github.linwancen.plugin.graph.ui.GraphWindowFactory;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
@@ -109,7 +110,9 @@ public class JcefNavigateHandler extends CefMessageRouterHandlerAdapter {
                             return;
                         }
                         GraphWindowFactory.openMethodTab(project, target, true);
-                        CallChainToolWindowFactory.showFor(project, target);
+                        if (DrawGraphProjectState.of(project).getShowCallChain()) {
+                            CallChainToolWindowFactory.showFor(project, target);
+                        }
                         callback.success("open graph: " + filePath + "#" + offset);
                         return;
                     }

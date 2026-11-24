@@ -88,6 +88,10 @@ public class GraphWindow {
             RelController.reload(project, this);
         });
 
+        showCallChain.setSelected(projectState.getShowCallChain());
+        showCallChain.addActionListener(e ->
+                projectState.setShowCallChain(showCallChain.isSelected()));
+
         lr.setSelected(appState.getLr());
         lr.addActionListener(e -> {
             appState.setLr(lr.isSelected());
@@ -176,6 +180,7 @@ public class GraphWindow {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         for (Component component : new Component[]{
                 openDir, reload, reset, lr, autoLoad, skipLib, skipGetSetIs, doc, impl, mvc,
+                showCallChain,
         }) {
             toolbar.add(component);
         }
@@ -356,6 +361,7 @@ public class GraphWindow {
     private JButton reset;
     private JCheckBox autoLoad;
     private JCheckBox skipLib;
+    private JCheckBox showCallChain;
     // region title
 
     // region html
