@@ -16,17 +16,21 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.JavaRecursiveElementVisitor
+import com.intellij.psi.PsiAssignmentExpression
 import com.intellij.psi.PsiCallExpression
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiExpression
 import com.intellij.psi.PsiLambdaExpression
+import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.PsiMethodReferenceExpression
 import com.intellij.psi.PsiModifier
 import com.intellij.psi.PsiNewExpression
 import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.PsiReturnStatement
 import com.intellij.psi.PsiType
 import com.intellij.psi.PsiTypeCastExpression
 import com.intellij.psi.PsiVariable
@@ -123,6 +127,7 @@ private data class CallChainOptions(
     val skipConstructors: Boolean = true,
     val skipPrivateMethods: Boolean = false,
     val skipFrameworkCalls: Boolean = true,
+    val expandAmbiguousImplementations: Boolean = false,
     val maxDepth: Int = 5,
     val excludedPatterns: List<String> = emptyList(),
 )
@@ -157,6 +162,8 @@ private data class SequenceEvent(
     val callback: Boolean,
     val lambda: Boolean,
     val implementation: Boolean,
+    /** Interface call whose concrete receiver could not be inferred. */
+    val ambiguous: Boolean = false,
     /** Last event row belonging to this invocation, used to draw its return. */
     var returnIndex: Int = index,
 )
@@ -170,6 +177,7 @@ private data class ChainSnapshot(
     val truncated: Boolean,
     /** Includes invocation rows and their distinct return rows. */
     val rowCount: Int = 0,
+    val ambiguousCalls: Int = 0,
 )
 
 /**
@@ -240,6 +248,7 @@ private data class CallTarget(
     val node: CallableNode,
     val callback: Boolean = false,
     val implementation: Boolean = false,
+    val ambiguous: Boolean = false,
 )
 
 private data class DirectCall(
@@ -302,7 +311,7 @@ private class CallChainContext(
 
         const val MAX_EVENTS = 600
         const val MAX_UNIQUE_NODES = 160
-        const val MAX_IMPLEMENTATIONS_PER_CALL = 3
+        const val MAX_IMPLEMENTATIONS_PER_CALL = 16
         const val MAX_IMPLEMENTATION_EVENTS = 30
 
         val FRAMEWORK_PACKAGES = listOf(
@@ -322,6 +331,15 @@ private class CallChainContext(
             "cn.hutool.",
         )
 
+        val STEREOTYPE_ANNOTATIONS = listOf(
+            ".Component",
+            ".Service",
+            ".Repository",
+            ".Controller",
+            ".RestController",
+            ".Named",
+        )
+
         val WHITESPACE = Regex("\\s+")
         val GETTER_BODY = Regex(
             "^return(?:this\\.)?[A-Za-z_$][A-Za-z0-9_$]*$"
@@ -338,6 +356,9 @@ private class CallChainContext(
         private set
 
     var truncated = false
+        private set
+
+    var ambiguousCalls = 0
         private set
 
     private var implementationEvents = 0
@@ -364,6 +385,7 @@ private class CallChainContext(
     private val callbackCache = HashMap<String, List<PsiMethod>>()
     private val directCallCache = HashMap<String, List<DirectCall>>()
     private val implementationCache = HashMap<String, List<PsiMethod>>()
+    private val implementationOverflow = HashSet<String>()
 
     private val expandedNodes = HashSet<String>()
 
@@ -373,6 +395,7 @@ private class CallChainContext(
             events = events.toList(),
             truncated = truncated,
             rowCount = rowCount,
+            ambiguousCalls = ambiguousCalls,
         )
     }
 
@@ -491,6 +514,7 @@ private class CallChainContext(
         callback: Boolean,
         lambda: Boolean,
         implementation: Boolean,
+        ambiguous: Boolean,
     ): SequenceEvent? {
 
         if (events.size >= MAX_EVENTS) {
@@ -531,6 +555,7 @@ private class CallChainContext(
             callback = callback,
             lambda = lambda,
             implementation = implementation,
+            ambiguous = ambiguous,
             returnIndex = index,
         )
         events.add(event)
@@ -613,6 +638,7 @@ private class CallChainContext(
                         callback = target.callback,
                         lambda = callee.lambda,
                         implementation = target.implementation,
+                        ambiguous = target.ambiguous,
                     )
                 } else {
                     null
@@ -825,12 +851,13 @@ private class CallChainContext(
         }
 
         val inferred = inferConcrete(call, method)
-        if (inferred != null && isAllowedMethod(inferred)) {
+        if (inferred != null) {
             return listOf(
-                CallTarget(
-                    node = methodNode(inferred),
-                    implementation = !sameMethod(inferred, method),
-                )
+                if (isAllowedMethod(inferred)) {
+                    resolvedTarget(inferred, method)
+                } else {
+                    CallTarget(methodNode(method))
+                }
             )
         }
 
@@ -838,15 +865,29 @@ private class CallChainContext(
         if (implementations.isEmpty()) {
             return listOf(CallTarget(methodNode(method)))
         }
+        if (implementations.size == 1) {
+            return listOf(resolvedTarget(implementations[0], method))
+        }
+
+        val contextual = inferFromCallSite(call, method, implementations)
+        if (contextual != null && isAllowedMethod(contextual)) {
+            return listOf(resolvedTarget(contextual, method))
+        }
+
+        if (!options.expandAmbiguousImplementations) {
+            ambiguousCalls++
+            return listOf(CallTarget(node = methodNode(method), ambiguous = true))
+        }
+
+        if (implementationOverflow.contains(methodKey(method)) ||
+            implementations.size >= MAX_IMPLEMENTATIONS_PER_CALL
+        ) {
+            truncated = true
+        }
 
         val targets = ArrayList<CallTarget>(implementations.size)
         for (implementation in implementations) {
-            targets.add(
-                CallTarget(
-                    node = methodNode(implementation),
-                    implementation = true,
-                )
-            )
+            targets.add(resolvedTarget(implementation, method))
         }
         return targets
     }
@@ -920,6 +961,235 @@ private class CallChainContext(
             }
         }
         return null
+    }
+
+    /**
+     * Last resort before giving up: use bean names, assignments and this/super
+     * context to pick one implementation instead of drawing every candidate.
+     */
+    private fun inferFromCallSite(
+        call: PsiCallExpression,
+        method: PsiMethod,
+        implementations: List<PsiMethod>,
+    ): PsiMethod? {
+        val qualifier = (call as? PsiMethodCallExpression)
+            ?.methodExpression
+            ?.qualifierExpression
+
+        if (qualifier == null || qualifier.text == "this") {
+            val current = safe {
+                PsiTreeUtil.getParentOfType(call, PsiClass::class.java, false)
+            } ?: return null
+            return findImplementationInHierarchy(current, method)
+        }
+
+        if (qualifier.text == "super") {
+            val current = safe {
+                PsiTreeUtil.getParentOfType(call, PsiClass::class.java, false)
+            } ?: return null
+            val superClass = safe { current.superClass } ?: return null
+            return findImplementationInHierarchy(superClass, method)
+        }
+
+        val variable = resolveVariable(qualifier)
+        if (variable != null) {
+            val byBeanName = findImplementationByBeanName(variable, implementations)
+            if (byBeanName != null) {
+                return byBeanName
+            }
+
+            val byAssignment = findImplementationByAssignment(
+                variable,
+                call,
+                implementations,
+            )
+            if (byAssignment != null) {
+                return byAssignment
+            }
+        }
+
+        return findImplementationFromReturn(qualifier, implementations)
+    }
+
+    private fun resolvedTarget(
+        method: PsiMethod,
+        declared: PsiMethod,
+    ): CallTarget {
+        return CallTarget(
+            node = methodNode(method),
+            implementation = !sameMethod(method, declared),
+        )
+    }
+
+    private fun resolveVariable(expression: PsiExpression): PsiVariable? {
+        var current = safe { PsiUtil.skipParenthesizedExprDown(expression) }
+        val cast = current as? PsiTypeCastExpression
+        if (cast != null) {
+            val operand = safe { cast.operand }
+            current = operand?.let { safe { PsiUtil.skipParenthesizedExprDown(it) } }
+        }
+        val reference = current as? PsiReferenceExpression ?: return null
+        return safe { reference.resolve() } as? PsiVariable
+    }
+
+    private fun findImplementationInHierarchy(
+        start: PsiClass,
+        method: PsiMethod,
+    ): PsiMethod? {
+        var current: PsiClass? = start
+        while (current != null) {
+            val found = findImplementationInClass(current, method)
+            if (found != null) {
+                return found
+            }
+            val parent = current
+            current = safe { parent.superClass }
+        }
+        return null
+    }
+
+    private fun findImplementationByBeanName(
+        variable: PsiVariable,
+        implementations: List<PsiMethod>,
+    ): PsiMethod? {
+        val names = LinkedHashSet<String>()
+        annotationString(variable, "value", "Qualifier")?.let { names.add(it) }
+        annotationString(variable, "name", "Resource")?.let { names.add(it) }
+        annotationString(variable, "value", "Resource")?.let { names.add(it) }
+        val variableName = variable.name
+        if (!variableName.isNullOrBlank()) {
+            names.add(variableName)
+        }
+        if (names.isEmpty()) {
+            return null
+        }
+
+        val normalized = names.map { normalizeBeanName(it) }
+        for (implementation in implementations) {
+            val owner = implementation.containingClass ?: continue
+            val beanNames = beanNamesOf(owner)
+            if (normalized.any { name -> beanNames.any { it == name } }) {
+                return implementation
+            }
+        }
+
+        val fuzzy = implementations.filter { implementation ->
+            val simple = implementation.containingClass?.name ?: return@filter false
+            val bean = normalizeBeanName(simple)
+            val stripped = bean.removeSuffix("impl")
+            normalized.any { name -> bean.startsWith(name) || stripped.startsWith(name) }
+        }
+        return fuzzy.singleOrNull()
+    }
+
+    private fun findImplementationByAssignment(
+        variable: PsiVariable,
+        call: PsiCallExpression,
+        implementations: List<PsiMethod>,
+    ): PsiMethod? {
+        val body = safe {
+            PsiTreeUtil.getParentOfType(call, PsiMethod::class.java, false)?.body
+        } ?: return null
+
+        var found: PsiMethod? = null
+        body.accept(object : JavaRecursiveElementVisitor() {
+            override fun visitAssignmentExpression(expression: PsiAssignmentExpression) {
+                if (found == null) {
+                    val left = safe {
+                        (expression.lExpression as? PsiReferenceExpression)?.resolve()
+                    }
+                    if (left == variable) {
+                        found = findImplementationByType(
+                            safe { expression.rExpression?.type },
+                            implementations,
+                        )
+                    }
+                }
+                super.visitAssignmentExpression(expression)
+            }
+        })
+        return found
+    }
+
+    private fun findImplementationFromReturn(
+        expression: PsiExpression,
+        implementations: List<PsiMethod>,
+    ): PsiMethod? {
+        val receiverCall = expression as? PsiMethodCallExpression ?: return null
+        val callee = safe { receiverCall.resolveMethod() } ?: return null
+        val body = callee.body ?: return null
+
+        var found: PsiMethod? = null
+        body.accept(object : JavaRecursiveElementVisitor() {
+            override fun visitReturnStatement(statement: PsiReturnStatement) {
+                if (found == null) {
+                    found = findImplementationByType(
+                        safe { statement.returnValue?.type },
+                        implementations,
+                    )
+                }
+                super.visitReturnStatement(statement)
+            }
+        })
+        return found
+    }
+
+    private fun findImplementationByType(
+        type: PsiType?,
+        implementations: List<PsiMethod>,
+    ): PsiMethod? {
+        val clazz = type?.let { safe { PsiUtil.resolveClassInType(it) } }
+            ?: return null
+        if (clazz.isInterface || (safe { PsiUtil.isAbstractClass(clazz) } ?: false)) {
+            return null
+        }
+        return implementations.firstOrNull { it.containingClass == clazz }
+    }
+
+    private fun annotationString(
+        variable: PsiVariable,
+        attribute: String,
+        annotationSuffix: String,
+    ): String? {
+        for (annotation in variable.annotations) {
+            val qualifiedName = annotation.qualifiedName ?: continue
+            if (!qualifiedName.endsWith(".$annotationSuffix")) {
+                continue
+            }
+            val value = safe { annotation.findAttributeValue(attribute) }
+                ?: continue
+            val string = (value as? PsiLiteralExpression)?.value as? String
+            if (!string.isNullOrBlank()) {
+                return string
+            }
+        }
+        return null
+    }
+
+    private fun beanNamesOf(containingClass: PsiClass): Set<String> {
+        val names = LinkedHashSet<String>()
+        val simpleName = containingClass.name ?: return names
+        names.add(normalizeBeanName(simpleName))
+
+        for (annotation in containingClass.annotations) {
+            val qualifiedName = annotation.qualifiedName ?: continue
+            if (!STEREOTYPE_ANNOTATIONS.any { qualifiedName.endsWith(it) }) {
+                continue
+            }
+            val value = safe { annotation.findAttributeValue("value") }
+            val string = (value as? PsiLiteralExpression)?.value as? String
+            if (!string.isNullOrBlank()) {
+                names.add(normalizeBeanName(string))
+            }
+        }
+        return names
+    }
+
+    private fun normalizeBeanName(name: String): String {
+        if (name.isEmpty()) {
+            return name
+        }
+        return Character.toLowerCase(name[0]) + name.substring(1)
     }
 
     private fun addConcreteClass(
@@ -1021,7 +1291,7 @@ private class CallChainContext(
                 }
                 result[implementationKey] = implementation
                 if (result.size >= MAX_IMPLEMENTATIONS_PER_CALL) {
-                    truncated = true
+                    implementationOverflow.add(key)
                     break
                 }
             }
@@ -1254,7 +1524,8 @@ private class DirectCallCollector(
         val seen = HashSet<String>(targets.size)
         val unique = ArrayList<CallTarget>(targets.size)
         for (target in targets) {
-            val key = "${target.node.key}#${target.callback}#${target.implementation}"
+            val key =
+                "${target.node.key}#${target.callback}#${target.implementation}#${target.ambiguous}"
             if (seen.add(key)) {
                 unique.add(target)
             }
@@ -1294,6 +1565,8 @@ private class CallChainPanel(
 
     private val skipFrameworkCalls = JCheckBox("过滤框架调用", true)
 
+    private val expandAmbiguous = JCheckBox("展开接口多实现", false)
+
     private val maxDepthSpinner = JSpinner(
         SpinnerNumberModel(5, 1, 30, 1)
     )
@@ -1316,6 +1589,9 @@ private class CallChainPanel(
 
         const val KEY_SKIP_FRAMEWORK =
             "draw.graph.callchain.skipFramework"
+
+        const val KEY_EXPAND_AMBIGUOUS =
+            "draw.graph.callchain.expandAmbiguous"
 
         const val KEY_MAX_DEPTH =
             "draw.graph.callchain.maxDepth"
@@ -1359,6 +1635,7 @@ private class CallChainPanel(
             skipConstructors,
             skipPrivateMethods,
             skipFrameworkCalls,
+            expandAmbiguous,
         ).forEach { checkbox ->
             checkbox.addActionListener { onOptionChanged() }
             filterPanel.add(checkbox)
@@ -1423,6 +1700,8 @@ private class CallChainPanel(
             properties.getBoolean(KEY_SKIP_PRIVATE, false)
         skipFrameworkCalls.isSelected =
             properties.getBoolean(KEY_SKIP_FRAMEWORK, true)
+        expandAmbiguous.isSelected =
+            properties.getBoolean(KEY_EXPAND_AMBIGUOUS, false)
 
         maxDepthSpinner.value =
             properties.getInt(KEY_MAX_DEPTH, 5).coerceIn(1, 30)
@@ -1443,6 +1722,7 @@ private class CallChainPanel(
         properties.setValue(KEY_SKIP_CONSTRUCTORS, skipConstructors.isSelected)
         properties.setValue(KEY_SKIP_PRIVATE, skipPrivateMethods.isSelected)
         properties.setValue(KEY_SKIP_FRAMEWORK, skipFrameworkCalls.isSelected)
+        properties.setValue(KEY_EXPAND_AMBIGUOUS, expandAmbiguous.isSelected)
         properties.setValue(
             KEY_MAX_DEPTH,
             (maxDepthSpinner.value as Number).toInt().toString(),
@@ -1466,6 +1746,7 @@ private class CallChainPanel(
             skipConstructors = skipConstructors.isSelected,
             skipPrivateMethods = skipPrivateMethods.isSelected,
             skipFrameworkCalls = skipFrameworkCalls.isSelected,
+            expandAmbiguousImplementations = expandAmbiguous.isSelected,
             maxDepth = (maxDepthSpinner.value as Number).toInt(),
             excludedPatterns = patterns,
         )
@@ -1543,10 +1824,15 @@ private class CallChainPanel(
                             canvas.setSnapshot(snapshot)
                             resetCanvasViewport()
 
-                            val suffix = if (snapshot.truncated) {
-                                " · 已达到分析上限"
-                            } else {
-                                ""
+                            val suffix = buildString {
+                                if (snapshot.truncated) {
+                                    append(" · 已达到分析上限")
+                                }
+                                if (snapshot.ambiguousCalls > 0) {
+                                    append(" · 多实现未展开 ")
+                                    append(snapshot.ambiguousCalls)
+                                    append(" 处")
+                                }
                             }
                             status.text =
                                 "类 ${snapshot.participants.size} · " +
@@ -2113,6 +2399,7 @@ private class CallChainCanvas(
         val suffix = when {
             event.lambda -> " [λ]"
             event.callback -> " [回调]"
+            event.ambiguous -> " [接口·多实现]"
             event.implementation -> " [实现]"
             else -> ""
         }
@@ -2142,6 +2429,7 @@ private class CallChainCanvas(
 
         g.color = TEXT_COLOR
         g.drawString("方法返回", x + 156, y + 13)
+        g.drawString("[接口·多实现] 未唯一推断", x + 240, y + 13)
     }
 
     private companion object {
