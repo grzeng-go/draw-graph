@@ -205,92 +205,44 @@ private object CallChainAnalyzer {
 
         val expanded = mutableSetOf<String>()
 
-
-
-        /**
-         * Find methods directly called by the specified method.
-         *
-         * Java PSI based implementation.
-         *
-         * Rules:
-         * 1. Only inspect actual Java call expressions.
-         * 2. Do not enter anonymous or local classes.
-         * 3. Do not scan nested method bodies.
-         * 4. Keep lambda calls.
-         * 5. Only include project Java source methods.
-         * 6. Preserve recursive calls for cycle detection.
-         * 7. Keep Graph parser target compatibility.
-         */
         fun directCallees(method: PsiMethod): List<PsiMethod> {
 
             if (!isProjectJavaMethod(project, method)) {
                 return emptyList()
             }
 
-            val methodFile = method.containingFile?.virtualFile
-                ?: return emptyList()
-
-            if (methodFile.fileSystem !is LocalFileSystem) {
-                return emptyList()
-            }
-
             val body = method.body ?: return emptyList()
-
             val result = linkedMapOf<String, PsiMethod>()
 
             body.accept(object : PsiRecursiveElementWalkingVisitor() {
 
                 override fun visitElement(element: PsiElement) {
 
-                    // Do not enter anonymous classes or local classes.
+                    // 不将匿名类、局部类中的调用归属于当前方法
                     if (element is PsiClass) {
                         return
                     }
 
-                    // Do not enter other method bodies.
+                    // 不进入其他方法体
                     if (element is PsiMethod && element != method) {
                         return
                     }
 
                     if (element is PsiCallExpression) {
-
                         try {
-
+                            // 使用 Java PSI 原始解析结果，不做 Graph 二次转换
                             val resolved = element.resolveMethod()
 
-                            if (resolved != null && resolved.isValid) {
-
-                                // Keep the original Graph parser compatibility.
-                                // If no parser exists, use the resolved Java method.
-                                val graphTarget =
-                                    Parser.graphTarget(project, resolved)
-                                        ?: resolved
-
-                                val targetMethod =
-                                    graphTarget as? PsiMethod
-                                        ?: resolved
-
-                                if (
-                                    targetMethod.isValid &&
-                                    isProjectJavaMethod(
-                                        project,
-                                        targetMethod,
-                                    )
-                                ) {
-
-                                    val id = methodId(targetMethod)
-
-                                    // Keep recursive calls.
-                                    // walk() is responsible for cycle detection.
-                                    result.putIfAbsent(
-                                        id,
-                                        targetMethod,
-                                    )
-                                }
+                            if (
+                                resolved != null &&
+                                resolved.isValid &&
+                                isProjectJavaMethod(project, resolved)
+                            ) {
+                                val id = methodId(resolved)
+                                result.putIfAbsent(id, resolved)
                             }
-
                         } catch (_: RuntimeException) {
-                            // Ignore incomplete PSI references.
+                            // 忽略尚未完成解析的 PSI 引用
                         }
                     }
 
@@ -300,8 +252,6 @@ private object CallChainAnalyzer {
 
             return result.values.toList()
         }
-
-
 
         /**
          * Decide whether a method should be visible.
