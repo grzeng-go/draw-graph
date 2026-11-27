@@ -1,5 +1,6 @@
 package com.github.linwancen.plugin.graph.ui
 
+import com.github.linwancen.plugin.graph.parser.CommentUtils
 import com.github.linwancen.plugin.graph.parser.Parser
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
@@ -19,6 +20,7 @@ import com.intellij.psi.JavaRecursiveElementVisitor
 import com.intellij.psi.PsiAssignmentExpression
 import com.intellij.psi.PsiCallExpression
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiExpression
@@ -42,6 +44,7 @@ import com.intellij.ui.content.ContentFactory
 import java.awt.BasicStroke
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
@@ -152,8 +155,12 @@ private data class SequenceEvent(
     val index: Int,
     val callerId: String,
     val callerMethod: String,
+    val callerParams: String = "",
+    val callerComment: String = "",
     val calleeId: String,
     val calleeMethod: String,
+    val calleeParams: String = "",
+    val calleeComment: String = "",
     val fileUrl: String?,
     val offset: Int,
     val depth: Int,
@@ -164,6 +171,8 @@ private data class SequenceEvent(
     val implementation: Boolean,
     /** Interface call whose concrete receiver could not be inferred. */
     val ambiguous: Boolean = false,
+    /** Presentable return type of the call site, drawn on the return arrow. */
+    val returnType: String = "",
     /** Last event row belonging to this invocation, used to draw its return. */
     var returnIndex: Int = index,
 )
@@ -312,6 +321,7 @@ private class CallChainContext(
         const val MAX_EVENTS = 600
         const val MAX_UNIQUE_NODES = 160
         const val MAX_IMPLEMENTATIONS_PER_CALL = 16
+        const val MAX_COMMENT_LENGTH = 18
         const val MAX_IMPLEMENTATION_EVENTS = 30
 
         val FRAMEWORK_PACKAGES = listOf(
@@ -515,6 +525,7 @@ private class CallChainContext(
         lambda: Boolean,
         implementation: Boolean,
         ambiguous: Boolean,
+        returnType: String,
     ): SequenceEvent? {
 
         if (events.size >= MAX_EVENTS) {
@@ -545,8 +556,12 @@ private class CallChainContext(
             index = index,
             callerId = callerParticipant.id,
             callerMethod = caller.name,
+            callerParams = callableParams(caller),
+            callerComment = callableComment(caller),
             calleeId = calleeParticipant.id,
             calleeMethod = callee.name,
+            calleeParams = callableParams(callee),
+            calleeComment = callableComment(callee),
             fileUrl = file?.url,
             offset = navigation.textOffset.coerceAtLeast(0),
             depth = depth,
@@ -556,10 +571,86 @@ private class CallChainContext(
             lambda = lambda,
             implementation = implementation,
             ambiguous = ambiguous,
+            returnType = returnType,
             returnIndex = index,
         )
         events.add(event)
         return event
+    }
+
+    /** Prefer the call expression type: it is the actual invocation result. */
+    private fun returnTypeOf(site: PsiElement): String {
+        val expression = site as? PsiExpression ?: return ""
+        val type = safe { expression.type } ?: return ""
+        return safe { type.presentableText }?.takeIf { it.isNotBlank() } ?: ""
+    }
+
+    private fun callableReturnType(node: CallableNode): String {
+        val method = (node as? CallableNode.Method)?.method ?: return ""
+        val type = safe { method.returnType } ?: return "void"
+        return safe { type.presentableText }?.takeIf { it.isNotBlank() } ?: "void"
+    }
+
+    private fun commentElementOf(method: PsiMethod): PsiElement? {
+        safe { method.docComment }?.let { return it }
+        safe {
+            PsiTreeUtil.getPrevSiblingOfType(method, PsiComment::class.java)
+        }?.let { return it }
+
+        val superMethod = safe { method.findSuperMethods().firstOrNull() }
+            ?: return null
+        safe { superMethod.docComment }?.let { return it }
+        return safe {
+            PsiTreeUtil.getPrevSiblingOfType(superMethod, PsiComment::class.java)
+        }
+    }
+
+    /** First clean comment line, used as the compact label beside a method. */
+    private fun callableComment(node: CallableNode): String {
+        val method = (node as? CallableNode.Method)?.method ?: return ""
+        val comment = commentElementOf(method) ?: return ""
+
+        val text = safe { comment.text } ?: return ""
+        val cleaned = safe { CommentUtils.doc(text) }
+            ?.replace(WHITESPACE, " ")
+            ?.trim()
+            ?: return ""
+        val first = cleaned.firstCommentLine() ?: return ""
+        return truncate(first, MAX_COMMENT_LENGTH)
+    }
+
+    private fun String.firstCommentLine(): String? {
+        return lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotBlank() && !it.startsWith("@") }
+    }
+
+    private fun truncate(value: String, max: Int): String {
+        if (value.length <= max) {
+            return value
+        }
+        return value.substring(0, max - 1) + "…"
+    }
+
+    /** Short parameter types, used to distinguish overloaded methods. */
+    private fun callableParams(node: CallableNode): String {
+        val parameters = when (node) {
+            is CallableNode.Method -> safe { node.method.parameterList.parameters }
+            is CallableNode.Lambda -> safe { node.expression.parameterList.parameters }
+        } ?: return ""
+        if (parameters.isEmpty()) {
+            return ""
+        }
+
+        val result = StringBuilder()
+        for (parameter in parameters) {
+            if (result.isNotEmpty()) {
+                result.append(", ")
+            }
+            val type = safe { parameter.type?.presentableText }
+            result.append(type?.takeIf { it.isNotBlank() } ?: "?")
+        }
+        return result.toString()
     }
 
     private fun nextRow(): Int = rowCount++
@@ -627,6 +718,8 @@ private class CallChainContext(
                 val callee = target.node
                 val cycle = callee.key in path
                 val displayable = isDisplayable(callee)
+                val returnType = returnTypeOf(call.site)
+                    .ifBlank { callableReturnType(callee) }
 
                 val event = if (displayable) {
                     addEvent(
@@ -639,6 +732,7 @@ private class CallChainContext(
                         lambda = callee.lambda,
                         implementation = target.implementation,
                         ambiguous = target.ambiguous,
+                        returnType = returnType,
                     )
                 } else {
                     null
@@ -1909,6 +2003,18 @@ private class CallChainCanvas(
 
     init {
         background = BACKGROUND
+        toolTipText = ""
+
+        addMouseMotionListener(object : MouseAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                val overCall = hits.any { it.bounds.contains(e.point) }
+                cursor = if (overCall) {
+                    Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                } else {
+                    Cursor.getDefaultCursor()
+                }
+            }
+        })
 
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
@@ -1998,6 +2104,36 @@ private class CallChainCanvas(
 
     override fun getPreferredSize(): Dimension {
         return preferred
+    }
+
+    override fun getToolTipText(event: MouseEvent): String? {
+        val hit = hits.firstOrNull { it.bounds.contains(event.point) }
+            ?: return null
+        val e = hit.event
+
+        val lines = ArrayList<String>()
+        lines.add("调用：${fullSignature(e.callerMethod, e.callerParams, "", e.callerComment)}")
+        lines.add("被调：${fullSignature(e.calleeMethod, e.calleeParams, e.returnType, e.calleeComment)}")
+        if (e.ambiguous) {
+            lines.add("接口多实现：未唯一推断，已折叠")
+        } else if (e.implementation) {
+            lines.add("接口实现调用")
+        }
+        if (e.callback) {
+            lines.add("回调调用")
+        }
+        if (e.lambda) {
+            lines.add("Lambda 调用")
+        }
+
+        return "<html>${lines.joinToString("<br>") { htmlEscape(it) }}</html>"
+    }
+
+    private fun htmlEscape(value: String): String {
+        return value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
     }
 
     private fun updateFonts() {
@@ -2280,7 +2416,6 @@ private class CallChainCanvas(
         clip: Rectangle,
     ) {
         g2.stroke = RETURN_STROKE
-        var currentColor: Color? = null
 
         for (event in data.events) {
             val callerX = xOf(event.callerId) ?: continue
@@ -2296,10 +2431,7 @@ private class CallChainCanvas(
             }
 
             val color = if (event.cycle) CYCLE_COLOR else RETURN_COLOR
-            if (color != currentColor) {
-                g2.color = color
-                currentColor = color
-            }
+            g2.color = color
 
             if (event.selfCall) {
                 val loopWidth = 44
@@ -2316,6 +2448,24 @@ private class CallChainCanvas(
 
                 g2.drawLine(startX, y, endX, y)
                 drawArrowHead(g2, endX, y, direction)
+            }
+
+            if (event.returnType.isNotBlank()) {
+                val label = ": ${event.returnType}"
+                g2.font = labelFont
+                val labelWidth = g2.fontMetrics.stringWidth(label)
+                val labelX = if (event.selfCall) {
+                    calleeX + 55
+                } else {
+                    (callerX + calleeX) / 2 - labelWidth / 2
+                }
+                drawCallLabel(
+                    g = g2,
+                    text = label,
+                    x = labelX,
+                    y = y - 5,
+                    bold = false,
+                )
             }
         }
     }
@@ -2403,7 +2553,27 @@ private class CallChainCanvas(
             event.implementation -> " [实现]"
             else -> ""
         }
-        return "${event.callerMethod}() → ${event.calleeMethod}()$suffix"
+        val caller = compactSignature(event.callerMethod, event.callerComment)
+        val callee = compactSignature(event.calleeMethod, event.calleeComment)
+        return "$caller → $callee$suffix"
+    }
+
+    /** Default label stays short: method name plus its short comment. */
+    private fun compactSignature(name: String, comment: String): String {
+        return if (comment.isBlank()) "$name()" else "$name($comment)"
+    }
+
+    /** Hover tooltip uses the full signature to distinguish overloads. */
+    private fun fullSignature(
+        name: String,
+        params: String,
+        returnType: String,
+        comment: String,
+    ): String {
+        val arguments = if (params.isBlank()) "" else params
+        val result = if (returnType.isBlank()) "" else ": $returnType"
+        val note = if (comment.isBlank()) "" else "  // $comment"
+        return "$name($arguments)$result$note"
     }
 
     private fun drawLegend(g: Graphics2D) {
