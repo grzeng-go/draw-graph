@@ -66,7 +66,9 @@ import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
 import javax.swing.JTextField
+import javax.swing.Scrollable
 import javax.swing.SpinnerNumberModel
+import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import kotlin.math.abs
 import kotlin.math.max
@@ -1970,7 +1972,7 @@ private class CallChainPanel(
  */
 private class CallChainCanvas(
     private val project: Project,
-) : JPanel() {
+) : JPanel(), Scrollable {
 
     private data class Hit(
         val event: SequenceEvent,
@@ -2105,6 +2107,42 @@ private class CallChainCanvas(
     override fun getPreferredSize(): Dimension {
         return preferred
     }
+
+    /**
+     * The diagram is a large JPanel inside a JScrollPane. Without Scrollable,
+     * Swing falls back to a 1-pixel wheel unit, which feels extremely slow on
+     * a 72-pixel row layout. Scroll one call row / half a class column per
+     * wheel notch instead.
+     */
+    override fun getPreferredScrollableViewportSize(): Dimension = preferred
+
+    override fun getScrollableUnitIncrement(
+        visibleRect: Rectangle,
+        orientation: Int,
+        direction: Int,
+    ): Int {
+        return if (orientation == SwingConstants.VERTICAL) {
+            rowHeight
+        } else {
+            columnWidth / 2
+        }
+    }
+
+    override fun getScrollableBlockIncrement(
+        visibleRect: Rectangle,
+        orientation: Int,
+        direction: Int,
+    ): Int {
+        return if (orientation == SwingConstants.VERTICAL) {
+            max(rowHeight, visibleRect.height - rowHeight)
+        } else {
+            max(columnWidth, visibleRect.width - columnWidth)
+        }
+    }
+
+    override fun getScrollableTracksViewportWidth(): Boolean = false
+
+    override fun getScrollableTracksViewportHeight(): Boolean = false
 
     override fun getToolTipText(event: MouseEvent): String? {
         val hit = hits.firstOrNull { it.bounds.contains(event.point) }
